@@ -1,0 +1,30 @@
+# Agent actor: long-lived, holds the workspace across attempts and suspends.
+# Started from Substrate v0.5.0's counter template; image and probe changed.
+# ${IMAGE} is replaced by `make substrate-templates` with a pinned @sha256 digest.
+metadata:
+  atespace: poc
+  name: agent
+workerSelector:
+  matchLabels: {workload: poc}
+containers:
+  - name: agent
+    image: ${IMAGE}
+    command: ["python", "/opt/poc/agent/fake_agent.py", "serve", "80"]
+    wakeupProbe:
+      httpGet: {path: /readyz, port: 80}
+    volumeMounts:
+      - name: workspace
+        mountPath: /workspace
+resources:
+  limits:
+    - {name: cpu, quantity: "1"}
+    - {name: memory, quantity: 512Mi}
+snapshotConfig:
+  preferredFidelity: SNAPSHOT_FIDELITY_MEMORY
+  storageLocation: gs://ate-snapshots/poc/agent/
+sandboxConfig:
+  sandboxClass: gvisor
+  configName: gvisor-default
+volumes:
+  - name: workspace
+    durableDir: {}

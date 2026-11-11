@@ -1,0 +1,6 @@
+# Allow nothing. Shape from google/agentmesh development/examples/substrate-actor/egress-policy.yaml
+# with every rule deleted. Substrate denies all egress when an actor has no policy,
+# so this is only applied when SUBSTRATE_APPLY_EGRESS=1 (to test that an explicit
+# empty policy behaves the same):
+#   kubectl ate create egress-policy <actor> -a poc -f clusters/substrate/egress-policy.yaml
+rules: []

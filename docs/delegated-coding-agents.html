@@ -1,0 +1,441 @@
+<title>Delegated Coding Agents</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a step-through system map (7 actors) beside a narration panel, then benefits, comparison and roadmap in one reading column. */
+:root {
+  --bg: #f5f6f9;
+  --surface: #ffffff;
+  --fg: #141a26;
+  --muted: #576075;
+  --line: #d9dee8;
+  --dim: 0.32;
+  --person: #2f6fd0;
+  --temporal: #4b4fd6;
+  --substrate: #0b8a7c;
+  --openshell: #b45f06;
+  --claude: #a8436b;
+  --github: #3b4556;
+  --good: #1d8a4a;
+  --bad: #c0392b;
+  --display: "Sora", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e121a; --surface: #161b26; --fg: #e7eaf2; --muted: #9ba4b9; --line: #283041; --dim: 0.28;
+    --person: #7aa8f0; --temporal: #a3a6ff; --substrate: #52d2c1; --openshell: #f2ab5e; --claude: #e98bb1; --github: #aab4c6;
+    --good: #5dd18c; --bad: #ff7b6c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e121a; --surface: #161b26; --fg: #e7eaf2; --muted: #9ba4b9; --line: #283041; --dim: 0.28;
+  --person: #7aa8f0; --temporal: #a3a6ff; --substrate: #52d2c1; --openshell: #f2ab5e; --claude: #e98bb1; --github: #aab4c6;
+  --good: #5dd18c; --bad: #ff7b6c;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font: 16px/1.6 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+main { max-width: 1080px; margin: 0 auto; padding-block: 44px 72px; display: grid; gap: 64px; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.15; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(1.9rem, 4.6vw, 2.7rem); letter-spacing: -0.02em; }
+h2 { font-size: 1.5rem; letter-spacing: -0.01em; }
+h3 { font-size: 1.05rem; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 0.74rem/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 1.12rem; color: var(--muted); }
+section { display: grid; gap: 18px; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+.ticket { display: grid; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; max-width: 680px; }
+.ticket .cmd { font: 500 0.95rem/1.5 var(--mono); color: var(--person); overflow-wrap: anywhere; }
+.ticket small { color: var(--muted); font-size: 0.85rem; }
+
+/* Proof strip */
+.proof { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.proof div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 2px; }
+.proof b { font: 600 1.15rem/1.2 var(--display); font-variant-numeric: tabular-nums; }
+.proof span { font-size: 0.85rem; color: var(--muted); }
+
+/* Walkthrough */
+.walk { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 860px) { .walk { grid-template-columns: 1fr; } }
+.map { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "dev front github" "temporal temporal temporal" "agent test claude"; }
+.node { --c: var(--muted); grid-area: var(--a); border: 1.5px solid var(--c); border-radius: 9px; padding: 10px 11px; min-width: 0;
+  background: color-mix(in srgb, var(--c) 8%, var(--surface)); opacity: var(--dim); transition: opacity .25s, box-shadow .25s, transform .25s; display: grid; gap: 2px; }
+.node.on { opacity: 1; box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 22%, transparent); transform: translateY(-1px); }
+.node b { font: 600 0.88rem/1.25 var(--display); color: var(--c); }
+.node span { font-size: 0.76rem; color: var(--muted); line-height: 1.35; }
+.node .state { font: 500 0.68rem/1 var(--mono); color: var(--c); margin-top: 4px; min-height: 0.7rem; }
+.n-dev { --c: var(--person); --a: dev; } .n-front { --c: var(--person); --a: front; } .n-github { --c: var(--github); --a: github; }
+.n-temporal { --c: var(--temporal); --a: temporal; } .n-agent { --c: var(--substrate); --a: agent; }
+.n-test { --c: var(--openshell); --a: test; } .n-claude { --c: var(--claude); --a: claude; }
+@media (max-width: 520px) { .map { grid-template-columns: 1fr 1fr; grid-template-areas: "dev front" "temporal temporal" "agent test" "github claude"; } }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: grid; gap: 14px; min-width: 0; }
+.panel .count { font: 500 0.75rem/1 var(--mono); color: var(--muted); }
+.panel h3 { font-size: 1.3rem; }
+.panel .what { font-size: 0.98rem; }
+.kv { display: grid; grid-template-columns: 112px 1fr; gap: 6px 12px; font-size: 0.9rem; }
+.kv dt { font: 500 0.72rem/1.6 var(--mono); text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; }
+.why { border-left: 3px solid var(--good); padding: 8px 12px; background: color-mix(in srgb, var(--good) 8%, var(--surface)); border-radius: 0 6px 6px 0; font-size: 0.95rem; }
+.why b { color: var(--good); }
+.event { font: 0.82rem/1.5 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; white-space: pre; }
+.event .bad { color: var(--bad); } .event .good { color: var(--good); }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+button { font: 500 0.88rem/1 var(--body); border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 7px; padding: 9px 14px; cursor: pointer; }
+button:hover { border-color: var(--temporal); }
+button:focus-visible, .steps button:focus-visible { outline: 2px solid var(--temporal); outline-offset: 2px; }
+button.primary { background: var(--temporal); border-color: var(--temporal); color: var(--surface); }
+.dots { display: flex; gap: 6px; margin-left: auto; }
+.dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); display: block; }
+.dots i.on { background: var(--temporal); }
+
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.steps button { width: 100%; text-align: left; display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; padding: 11px 12px; background: var(--surface); line-height: 1.4; }
+.steps button[aria-current="step"] { border-color: var(--temporal); box-shadow: 0 0 0 2px color-mix(in srgb, var(--temporal) 25%, transparent); }
+.steps .num { font: 600 0.8rem/1 var(--display); width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--temporal) 14%, var(--surface)); color: var(--temporal); }
+.steps b { display: block; font: 600 0.9rem/1.3 var(--display); }
+.steps small { color: var(--muted); font-size: 0.82rem; }
+
+/* Architecture diagrams */
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 10px; overflow-x: auto; }
+.diagram pre.mermaid { margin: 0; background: transparent; font-family: var(--body); }
+
+/* Benefits */
+.who { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.who > div { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 8px; align-content: start; }
+.who h3 { font-size: 1rem; }
+.who ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 0.92rem; color: var(--muted); }
+.who li::marker { color: var(--good); }
+
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.92rem; min-width: 620px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+thead th { font: 600 0.78rem/1.2 var(--display); text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+tbody th { font-weight: 600; white-space: nowrap; }
+tr:last-child th, tr:last-child td { border-bottom: 0; }
+
+/* Roadmap */
+.road { display: grid; gap: 0; }
+.phase { display: grid; grid-template-columns: 120px 1fr; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 560px) { .phase { grid-template-columns: 1fr; gap: 6px; } }
+.phase .tag { font: 600 0.75rem/1.2 var(--mono); padding: 5px 8px; border-radius: 5px; align-self: start; justify-self: start; }
+.tag.done { background: color-mix(in srgb, var(--good) 15%, var(--surface)); color: var(--good); }
+.tag.next { background: color-mix(in srgb, var(--temporal) 15%, var(--surface)); color: var(--temporal); }
+.tag.later { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+.phase div { display: grid; gap: 4px; min-width: 0; }
+.phase p { font-size: 0.93rem; color: var(--muted); }
+.phase .exit { font-size: 0.86rem; }
+footer { font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 18px; display: grid; gap: 6px; }
+@media (prefers-reduced-motion: reduce) { .node { transition: none; } }
+</style>
+
+<main>
+  <header style="display:grid;gap:16px">
+    <span class="eyebrow">Proposal · built on the Temporal + Substrate + OpenShell pilot</span>
+    <h1>Hand a coding task to an agent, get back a reviewed pull request</h1>
+    <p class="lede">A developer describes a small change in Slack. An AI agent does the work in a locked-down environment, proves it with the project's own tests, and opens a pull request for a human to review. It never holds a real password, it can't reach the open internet, and every step is on record.</p>
+    <div class="ticket" aria-label="Example request">
+      <span class="eyebrow">The example used on this page</span>
+      <span class="cmd">/agent example-org/storefront: Add an "Export CSV" button to the Orders page</span>
+      <small>A typical ticket: well understood, a few files, has tests, and nobody has had time for it this sprint.</small>
+    </div>
+  </header>
+
+  <section aria-labelledby="proof-h">
+    <span class="eyebrow">Already proven in the pilot</span>
+    <h2 id="proof-h">The plumbing works today</h2>
+    <div class="proof">
+      <div><b>10 / 10</b><span>test scenarios behave as designed, from happy path to cheating</span></div>
+      <div><b>45 s</b><span>for a full run across both runtimes, with zero leftovers</span></div>
+      <div><b>31 s</b><span>to recover a job after its server was killed mid-task</span></div>
+      <div><b>0</b><span>compute used while waiting for approval (agent frozen)</span></div>
+      <div><b>Logged</b><span>every blocked internet attempt, e.g. <code>NET:REFUSE DENIED example.com</code></span></div>
+    </div>
+    <p class="note" style="color:var(--muted);font-size:0.9rem">The pilot uses a scripted stand-in for the AI. The walkthrough below is the target design with a real model and real repositories.</p>
+  </section>
+
+  <section aria-labelledby="walk-h">
+    <span class="eyebrow">Walkthrough</span>
+    <h2 id="walk-h">One request, start to finish</h2>
+    <div class="walk">
+      <div class="map" id="map" aria-label="System map. Highlighted boxes are involved in the current step.">
+        <div class="node n-dev" data-n="dev"><b>Developer</b><span>Slack, web or a GitHub issue</span><i class="state mono"></i></div>
+        <div class="node n-front" data-n="front"><b>Front door</b><span>Company sign-in (SSO)</span><i class="state mono"></i></div>
+        <div class="node n-github" data-n="github"><b>GitHub</b><span>Via a GitHub App, as the user</span><i class="state mono"></i></div>
+        <div class="node n-temporal" data-n="temporal"><b>Temporal: the job manager</b><span>Runs the checklist, waits for people, survives crashes, keeps the history</span><i class="state mono"></i></div>
+        <div class="node n-agent" data-n="agent"><b>Agent room</b><span>Substrate: freezes when idle</span><i class="state mono"></i></div>
+        <div class="node n-test" data-n="test"><b>Test room</b><span>OpenShell: fresh and sealed each time</span><i class="state mono"></i></div>
+        <div class="node n-claude" data-n="claude"><b>Claude</b><span>Company API account, team budget</span><i class="state mono"></i></div>
+      </div>
+
+      <div class="panel" aria-live="polite">
+        <span class="count" id="count">Step 1 of 8</span>
+        <h3 id="title"></h3>
+        <p class="what" id="what"></p>
+        <div class="event" id="event"></div>
+        <dl class="kv">
+          <dt>Identity</dt><dd id="identity"></dd>
+          <dt>Credentials</dt><dd id="creds"></dd>
+        </dl>
+        <p class="why" id="why"></p>
+        <div class="controls">
+          <button type="button" id="prev">Previous</button>
+          <button type="button" id="next" class="primary">Next step</button>
+          <button type="button" id="play">Play</button>
+          <span class="dots" id="dots" aria-hidden="true"></span>
+        </div>
+      </div>
+    </div>
+    <ol class="steps" id="steps" aria-label="All steps"></ol>
+  </section>
+
+  <section aria-labelledby="arch-h">
+    <span class="eyebrow">Architecture</span>
+    <h2 id="arch-h">The components and how they connect</h2>
+    <p style="color:var(--muted)">The control plane holds identity and real secrets. The sandboxes only ever see placeholders, and the egress proxy swaps in the real value on the way out, for approved destinations only.</p>
+    <div class="diagram">
+      <span class="eyebrow">Component map</span>
+<pre class="mermaid">
+flowchart LR
+  subgraph People
+    dev["Developer<br/>Slack, web or GitHub issue"]
+    rev["Reviewer"]
+  end
+  subgraph Control["Control plane: identity and real secrets"]
+    front["Front door API<br/>company SSO"]
+    tmp["Temporal<br/>FeatureWorkflow"]
+    wrk["Worker<br/>runtime adapters"]
+    vault[("Secret store<br/>team Claude keys<br/>GitHub refresh tokens")]
+    audit[("Run history and<br/>security logs")]
+  end
+  subgraph Sandboxes["Sandboxes: placeholders only"]
+    agent["Agent room<br/>Substrate actor<br/>Claude Code + repo"]
+    test["Test room<br/>OpenShell sandbox<br/>no credentials"]
+    proxy{{"Egress proxy<br/>swaps placeholders"}}
+  end
+  subgraph External
+    claude["Claude API<br/>team workspace"]
+    gh["GitHub<br/>App + repos"]
+    net(("Rest of the<br/>internet"))
+  end
+  dev -->|"request"| front
+  front -->|"start run as user"| tmp
+  tmp <-->|"tasks"| wrk
+  wrk -->|"create, suspend, resume"| agent
+  wrk -->|"fresh room per attempt"| test
+  tmp -->|"approval card"| dev
+  agent --> proxy
+  vault -.->|"real secret at send time"| proxy
+  proxy -->|"team key added"| claude
+  proxy -->|"1-repo token added"| gh
+  agent -.-x|"blocked"| net
+  test -.-x|"blocked"| net
+  proxy -->|"NET:REFUSE events"| audit
+  tmp -->|"every step"| audit
+  wrk -->|"open PR as requester"| gh
+  gh -->|"PR to review"| rev
+  gh -->|"review webhook"| front
+</pre>
+    </div>
+    <div class="diagram">
+      <span class="eyebrow">Sequence for the Export CSV request</span>
+<pre class="mermaid">
+sequenceDiagram
+  actor Dev as Developer
+  participant FD as Front door
+  participant T as Temporal
+  participant A as Agent room (Substrate)
+  participant X as Test room (OpenShell)
+  participant C as Claude API
+  participant G as GitHub
+  Dev->>FD: /agent storefront Add Export CSV
+  FD->>G: Does this user have write access?
+  G-->>FD: Yes
+  FD->>T: Start run (user, repo, task)
+  T->>A: Create room, then suspend
+  T-->>Dev: Approval card in Slack
+  Dev->>T: Approve
+  loop Up to 3 attempts
+    T->>A: Implement (with last test failure)
+    A->>G: Clone or fetch via proxy (1-repo token)
+    A->>C: Claude Code calls via proxy (team key)
+    A-->>T: Diff
+    T->>X: Fresh room runs the project tests on the diff
+    X-->>T: Pass or fail with output
+  end
+  T->>A: Suspend while the PR waits
+  T->>G: Open PR as the requester
+  G-->>T: Review comment (webhook)
+  T->>A: Resume and revise
+  T->>X: Re-test in a fresh room
+  T->>G: Push to the same PR
+  G-->>T: Merged by reviewer
+  T->>A: Delete room, record usage
+</pre>
+    </div>
+  </section>
+
+  <section aria-labelledby="ben-h">
+    <span class="eyebrow">Benefits</span>
+    <h2 id="ben-h">What each group gets</h2>
+    <div class="who">
+      <div><h3>Developers</h3><ul><li>Hand off well-defined tickets from Slack and get a pull request back</li><li>Review it like any colleague's PR: diff, test output, and a link to exactly what the agent did</li><li>Several tasks can run in parallel without tying up a laptop</li></ul></div>
+      <div><h3>Security</h3><ul><li>No real API keys or GitHub tokens ever enter the agent's environment</li><li>Internet blocked by default; only Claude, GitHub and approved package registries are reachable</li><li>Tests run where the agent can't touch them, so results can't be faked</li><li>Every blocked attempt is logged with program and destination</li></ul></div>
+      <div><h3>Engineering leads</h3><ul><li>A person approves before work starts and before anything merges</li><li>Retries are capped, so a stuck task comes back to a human instead of burning budget</li><li>Spend is tracked per team, and idle agents cost nothing while frozen</li></ul></div>
+      <div><h3>Platform team</h3><ul><li>Crash-safe by design: jobs resume where they stopped</li><li>One workflow, swappable runtimes: Substrate, OpenShell or both</li><li>A complete audit trail for every run, searchable by user, repo and team</li></ul></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="cmp-h">
+    <span class="eyebrow">Compared with today</span>
+    <h2 id="cmp-h">Claude Code on a laptop vs. this flow</h2>
+    <p style="color:var(--muted)">Claude Code on a laptop stays the right tool for hands-on, interactive work. This flow is for work you delegate and review later.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th scope="col"></th><th scope="col">Claude Code on a laptop</th><th scope="col">Delegated agent flow</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Where credentials live</th><td>On the developer's machine, readable by the agent's processes</td><td>Outside the sandbox; the agent only sees placeholders</td></tr>
+          <tr><th scope="row">Internet access</th><td>Whatever the laptop can reach</td><td>Blocked except named services; attempts logged</td></tr>
+          <tr><th scope="row">Who checks the result</th><td>The developer, by running tests locally</td><td>A separate, sealed test room, then a human reviewer</td></tr>
+          <tr><th scope="row">What's recorded</th><td>Local session history</td><td>Full step-by-step history per run, per user</td></tr>
+          <tr><th scope="row">Waiting for review</th><td>A terminal stays open</td><td>The agent freezes; resumes when comments arrive</td></tr>
+          <tr><th scope="row">Cost tracking</th><td>Per seat</td><td>Per team budget, per run</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="road-h">
+    <span class="eyebrow">How we get there</span>
+    <h2 id="road-h">Implementation plan</h2>
+    <div class="road">
+      <div class="phase"><span class="tag done">Done</span><div><h3>Pilot: prove the plumbing</h3><p>Job manager, both sandbox runtimes, approval step, retries, crash recovery, internet blocking, tamper-proof testing, combined Substrate + OpenShell runs.</p></div></div>
+      <div class="phase"><span class="tag next">Phase 1</span><div><h3>One user, real Claude</h3><p>Swap the scripted agent for Claude Code. The API key is held by OpenShell and swapped in at the network edge. Upload a local project, run its own tests, return a patch.</p><p class="exit"><b>Done when</b> a small real feature lands as a correct patch on one of our repos.</p></div></div>
+      <div class="phase"><span class="tag later">Phase 2</span><div><h3>Pilot group of 2–3 developers</h3><p>Company sign-in on the front door and the sandbox gateway. A GitHub App opens PRs as the requesting user with short-lived, single-repo tokens. One shared cluster.</p><p class="exit"><b>Done when</b> PRs arrive attributed to the requester and no real credential is ever visible inside a sandbox.</p></div></div>
+      <div class="phase"><span class="tag later">Phase 3</span><div><h3>Teams</h3><p>A workspace and spend limit per team, secrets in a vault, per-repo internet allowlists, and the review-comment loop that wakes a frozen agent.</p><p class="exit"><b>Done when</b> cost per team is visible and blocked attempts flow into security logging.</p></div></div>
+      <div class="phase"><span class="tag later">Phase 4</span><div><h3>Scale</h3><p>Move to a cloud cluster, pack idle agents onto Substrate, add dashboards for throughput and cost per merged PR.</p><p class="exit"><b>Done when</b> we can quote cost per merged PR and how long PRs wait for review.</p></div></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Claude access uses the company's API account. Anthropic doesn't allow products to run on individual Claude.ai subscriptions, so users sign in with company SSO and usage is billed to their team.</span>
+    <span>Pilot versions: OpenShell 0.1.8, Substrate 0.5.0, Temporal dev server. Pilot figures are from runs on Nov 11, 2026.</span>
+  </footer>
+</main>
+
+<script>
+(function () {
+  var STEPS = [
+    { t: "Ask", short: "Request from Slack; identity and repo access checked",
+      on: ["dev", "front"], state: { dev: "requesting", front: "checking access" },
+      what: "The developer types the request in Slack. The front door confirms who they are through company sign-in, then asks GitHub whether they have write access to example-org/storefront.",
+      ev: '/agent example-org/storefront: Add "Export CSV" to Orders\n<span class="good">✓ signed in via SSO   ✓ has write access to storefront</span>',
+      id: "The developer's company login", cr: "None yet",
+      why: "<b>Benefit:</b> anyone can delegate from where they already work, and only people who could make the change themselves can ask an agent to." },
+    { t: "Approve", short: "Agent room created and frozen; human approves",
+      on: ["front", "temporal", "agent", "dev"], state: { temporal: "waiting for approval", agent: "frozen", dev: "approval card" },
+      what: "Temporal starts the job and asks Substrate for an agent room, which is created and frozen straight away. The tech lead gets an approval card in Slack. The job can wait hours or days here.",
+      ev: 'run cs-orders-csv-7f3a   phase: awaiting approval\nagent room: <span class="good">SUSPENDED (no compute)</span>',
+      id: "Run is tagged with the requester and team", cr: "None yet",
+      why: "<b>Benefit:</b> a person decides before any code is touched, and waiting costs nothing." },
+    { t: "Build", short: "Agent clones the repo and writes the change",
+      on: ["temporal", "agent", "claude", "github"], state: { agent: "working", claude: "thinking", github: "clone (read)" },
+      what: "On approval the agent room wakes. It clones the repo with a one-hour token limited to this repository, then Claude Code reads the Orders page and writes the export button, the CSV builder and a test. Midway it tries to fetch a script from an unknown site, which is blocked and logged.",
+      ev: 'git clone storefront             <span class="good">ok (token scoped to 1 repo, 1h)</span>\nPOST api.anthropic.com           <span class="good">ok (team key added at the edge)</span>\ncurl cdn.unknown-site.io/x.sh    <span class="bad">NET:REFUSE DENIED (policy)</span>',
+      id: "Acts for the developer, with the GitHub App's limits", cr: "Placeholders only. The real Claude key and GitHub token are swapped in by the network proxy and never stored in the room.",
+      why: "<b>Benefit:</b> if the agent is misled by something in the code it reads, there's no secret to steal and nowhere to send it." },
+    { t: "Check", short: "Fresh sealed room runs the project's tests",
+      on: ["temporal", "test"], state: { test: "running tests", temporal: "attempt 1" },
+      what: "A brand-new OpenShell test room applies the change to a clean copy of the repo, restores the official tests, and runs the project's test suite. It has no credentials and no internet. One test fails: the CSV is missing its header row.",
+      ev: 'npm test   orders/export.test.ts\n<span class="bad">✗ includes a header row</span>   41 passed, 1 failed\ntest room deleted',
+      id: "None needed", cr: "None at all",
+      why: "<b>Benefit:</b> the agent can't edit the tests that judge it, so a pass means the code really works." },
+    { t: "Fix", short: "Failure fed back; second attempt passes",
+      on: ["temporal", "agent", "claude", "test"], state: { agent: "attempt 2", test: "new room", temporal: "attempt 2" },
+      what: "Temporal hands the failing output back to the agent, which still has its notes from attempt 1. It adds the header row, and a second fresh test room confirms everything passes. After three failed attempts the job would stop and hand back to a person.",
+      ev: 'attempt 2   agent remembers attempt 1 (workspace kept)\n<span class="good">✓ 42 passed</span>   patch ready',
+      id: "Same run, same requester", cr: "Placeholders in the agent room; none in the test room",
+      why: "<b>Benefit:</b> the agent corrects itself, but within a hard limit, so nothing loops or runs up costs unnoticed." },
+    { t: "Pull request", short: "PR opened as the requester, with evidence",
+      on: ["temporal", "github", "dev"], state: { github: "PR #482 opened", dev: "notified" },
+      what: "The GitHub App opens a pull request marked as requested by the developer. It includes a summary of the change, the test output and a link to the full run history, then it goes through the normal review rules.",
+      ev: 'PR #482  Add CSV export to Orders page\nrequested by @developer · tests: <span class="good">42 passed</span> · run history: linked',
+      id: "GitHub App acting on the developer's behalf", cr: "Short-lived, single-repo token",
+      why: "<b>Benefit:</b> the same review process as any human change. Nothing merges without a person." },
+    { t: "Review loop", short: "Reviewer comments; frozen agent wakes and revises",
+      on: ["github", "temporal", "agent", "test", "claude"], state: { agent: "woken by comment", github: "review comment", test: "re-test" },
+      what: "Two days later a reviewer asks for large exports to be streamed instead of built in memory. GitHub notifies Temporal, the frozen agent room wakes up exactly where it left off, makes the change, re-tests in a fresh room and pushes to the same PR.",
+      ev: 'review: "stream rows for exports over 10k orders"\nagent room: SUSPENDED → RUNNING (2 days frozen)\n<span class="good">✓ 44 passed</span>   pushed to PR #482',
+      id: "Same run and requester", cr: "Placeholders only",
+      why: "<b>Benefit:</b> the agent works on the reviewer's schedule, and the days in between cost nothing." },
+    { t: "Done", short: "Merged; rooms deleted; history and cost kept",
+      on: ["dev", "front", "github", "temporal", "agent", "test", "claude"], state: { github: "merged", agent: "deleted", test: "none left", temporal: "complete", claude: "usage logged" },
+      what: "The reviewer approves and merges. Every room is deleted, the Claude usage is recorded against the team's budget, and the full step-by-step history stays searchable by user, repo and team.",
+      ev: 'PR #482 merged   rooms left running: 0\nusage → team "commerce" budget   history: kept',
+      id: "Recorded on every step", cr: "All temporary credentials expired",
+      why: "<b>Benefit:</b> every action is auditable, and spend is visible per team and per PR." }
+  ];
+
+  var i = 0, timer = null;
+  var $ = function (id) { return document.getElementById(id); };
+  var nodes = Array.prototype.slice.call(document.querySelectorAll(".node"));
+  var list = $("steps"), dots = $("dots");
+
+  STEPS.forEach(function (s, k) {
+    var li = document.createElement("li");
+    var b = document.createElement("button");
+    b.type = "button"; b.id = "step-" + (k + 1);
+    b.innerHTML = '<span class="num">' + (k + 1) + '</span><span><b>' + s.t + '</b><small>' + s.short + '</small></span>';
+    b.addEventListener("click", function () { stop(); go(k); });
+    li.appendChild(b); list.appendChild(li);
+    dots.appendChild(document.createElement("i"));
+  });
+
+  function go(k) {
+    i = (k + STEPS.length) % STEPS.length;
+    var s = STEPS[i];
+    $("count").textContent = "Step " + (i + 1) + " of " + STEPS.length;
+    $("title").textContent = s.t;
+    $("what").textContent = s.what;
+    $("event").innerHTML = s.ev;
+    $("identity").textContent = s.id;
+    $("creds").textContent = s.cr;
+    $("why").innerHTML = s.why;
+    nodes.forEach(function (n) {
+      var key = n.getAttribute("data-n");
+      n.classList.toggle("on", s.on.indexOf(key) !== -1);
+      n.querySelector(".state").textContent = (s.state && s.state[key]) || "";
+    });
+    Array.prototype.forEach.call(list.querySelectorAll("button"), function (b, k2) {
+      if (k2 === i) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current");
+    });
+    Array.prototype.forEach.call(dots.children, function (d, k2) { d.classList.toggle("on", k2 === i); });
+    $("next").textContent = i === STEPS.length - 1 ? "Start over" : "Next step";
+  }
+  function stop() { if (timer) { clearInterval(timer); timer = null; $("play").textContent = "Play"; } }
+  $("next").addEventListener("click", function () { stop(); go(i + 1); });
+  $("prev").addEventListener("click", function () { stop(); go(i - 1); });
+  $("play").addEventListener("click", function () {
+    if (timer) return stop();
+    $("play").textContent = "Pause";
+    timer = setInterval(function () { if (i === STEPS.length - 1) return stop(); go(i + 1); }, 4500);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+    if (e.key === "ArrowRight") { stop(); go(i + 1); }
+    if (e.key === "ArrowLeft") { stop(); go(i - 1); }
+  });
+  go(0);
+})();
+</script>

@@ -1,0 +1,7 @@
+# OpenShell chart 0.1.8 overrides. Local POC only: plain HTTP, no auth.
+# Source: docs/kubernetes/access-control.mdx (UNCONFIRMED end to end on kind).
+server:
+  disableTls: true
+gatewayConfig:
+  openshell.gateway.auth:
+    allow_unauthenticated_users: true

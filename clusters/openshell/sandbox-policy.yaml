@@ -1,0 +1,11 @@
+# No providers are attached (--no-auto-providers) and no network endpoints are
+# declared, so the sandbox should have no egress. Verify the effective policy with:
+#   openshell policy get <sandbox> --full
+version: 1
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /etc, /opt/poc, /dev, /proc]
+  read_write: [/tmp, /workspace, /dev/null]   # git apply opens /dev/null rw
+landlock:
+  compatibility: best_effort
+network_policies: {}
