@@ -3,14 +3,19 @@ SHELL := /bin/bash
 PY := .venv/bin/python
 TEMPORAL_DB := .cache/temporal.db
 
-.PHONY: help setup test images up stop start down tools gitea delivery kagent-apply kagent-key ui demo-ui \
+.PHONY: help doctor setup test images up poc-up kargo kargo-down stop start down tools gitea delivery kagent-apply kagent-key ui demo-ui \
         watch k9s dev dev-stop pipeline pipeline-stop forwards temporal worker leftovers clean
 
 help:
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
 
+doctor: ## check host prerequisites (docker, kubectl, helm, uv, temporal, openshell, node) and .env
+	@scripts/doctor.sh
+
 setup: ## python venv with temporalio, httpx, mcp, pytest
 	uv venv -q -p 3.12 .venv && uv pip install -q -p .venv -r requirements.txt
+$(PY): requirements.txt
+	uv venv -q -p 3.12 .venv && uv pip install -q -p .venv -r requirements.txt && touch $(PY)
 
 test: ## unit tests (no cluster): work item workflow, claude auth proxy, demo app
 	$(PY) -m pytest -q tests
@@ -20,13 +25,19 @@ test: ## unit tests (no cluster): work item workflow, claude auth proxy, demo ap
 images: ## build the verify supervisor and kagent harness images
 	scripts/images.sh
 
-# ---- the stack: one kind cluster with kagent (+ its Substrate) and OpenShell ---------
-up: ## bring everything up (fast if stopped or already running): poc cluster, kagent, OpenShell, Gitea, both agents
+# ---- the stack: poc cluster (kagent, Substrate, OpenShell) + Gitea + kargo stack (Kargo, Argo CD) --
+up: doctor $(PY) ## everything from a clean machine (fast if stopped or running): poc cluster, Gitea, agents, kargo stack, delivery
 	scripts/up.sh
-start: up ## same as up: restarts a stopped cluster in about a minute
-stop: dev-stop ## stop host processes and the poc cluster without deleting it (keeps installs, images, Gitea PRs)
+	scripts/kargo-up.sh
+	scripts/delivery-up.sh
+start: up ## same as up: restarts stopped clusters
+poc-up: ## only the poc cluster: kagent, OpenShell, Gitea, both agents
+	scripts/up.sh
+kargo: ## only the kargo stack: kargo-hub (Argo CD, Kargo), kargo-nonprod, kargo-prod, kargo-registry
+	scripts/kargo-up.sh
+stop: dev-stop ## stop host processes and all clusters without deleting them (keeps installs, images, Gitea PRs, releases)
 	-scripts/port-forwards.sh stop
-	-docker stop poc-control-plane
+	-docker stop poc-control-plane kargo-hub-control-plane kargo-nonprod-control-plane kargo-prod-control-plane
 tools: ## pinned kind + kagent CLIs in .cache/bin
 	scripts/tools.sh
 gitea: ## local Gitea with the demo-todo repo + webhook to the pipeline (http://localhost:3300)
@@ -60,8 +71,10 @@ pipeline-stop:
 forwards: ## (re)start the kagent UI/API and OpenShell gateway port-forwards
 	scripts/port-forwards.sh all
 
-down: stop ## delete the poc cluster; kind-registry, the image cache and Gitea are kept
+down: stop ## delete the poc cluster; kind-registry, the image cache, Gitea and the kargo stack are kept
 	-.cache/bin/kind delete cluster --name poc
+kargo-down: ## delete kargo-hub/nonprod/prod (also used by the standalone kargo demo, if you run it); registry kept
+	-for c in hub nonprod prod; do .cache/bin/kind delete cluster --name kargo-$$c; done
 
 # ---- foreground processes (for debugging; `make dev` runs them in the background) ----
 temporal: ## temporal dev server in the foreground (UI :8233)

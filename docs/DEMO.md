@@ -19,15 +19,13 @@ Small diagrams of each part (intake, agent turn, verify, preview, release, crede
 ## 1. Before you start
 
 ```bash
-../kargo/scripts/up.sh   # the kargo stack (6 kind clusters), if not already up
-make start            # poc cluster back from `make stop` (~2 min); first time: make up
+make up               # all clusters back from `make stop`; first time: builds everything (see README)
 make dev              # temporal + worker + pipeline server + claude auth proxy
-make delivery         # once: gitops repo, Kargo project demo-todo, first release 0.1.0, stage edges
 make kagent-key       # once per key change; prints which auth mode it chose
 make demo-ui          # opens every UI below
 ```
 
-`make delivery` is idempotent; run it again after `make stop`/`start` if the edge containers are gone.
+`make up` ends with `make delivery` (gitops repo, Kargo project, first release 0.1.0, stage edges), which is idempotent; run `make delivery` alone if the edge containers are gone.
 After changing [clusters/poc/kagent/](../clusters/poc/kagent/), run `make kagent-apply`.
 
 | What | URL | Login |
@@ -66,6 +64,25 @@ Optional: the Argo CD UI (preview apps `demo-todo-pr-N` appear and disappear), a
 Both run as Substrate actors (gVisor sandboxes inside the `kagent-default` pod, not pods of their
 own). `make watch` reads atelet's log to show them: **● awake** while working, **◌ suspended**
 (snapshot saved, CPU freed) between turns.
+
+### Looking inside an actor
+
+Each actor is one kagent session (`session-<id>`). An actor template is one version of an agent:
+kagent makes a new one (`dev-agent-<hash>`) whenever the agent's spec, prompt or image changes.
+Older sessions keep the template they started with.
+
+| To see | Where |
+|---|---|
+| What it did: messages, tool calls and their output, with snapshot markers | kagent UI → `http://localhost:8082/agents/<session id>/chat`. Each work item page links to its dev-agent transcript |
+| Which work item an actor belongs to | the work item page shows its session; `kagent agent session list` shows them all |
+| State, template, worker pod, version (it goes up at every suspend or resume) | kagent UI → **Substrate** page, or `grpcurl -plaintext -d '{}' localhost:8083 kagent.api.v1.SystemService/ListSubstrateActors` |
+| Wake and suspend events live | `make watch` (Actors panel), or `kubectl --context kind-poc -n ate-system logs ds/atelet -c atelet -f \| grep 'Handle RPC'` |
+| The turn as Temporal saw it (prompt, reply, retries) | work item page (Agent turns), or the `run_agent` activity in the Temporal UI |
+
+`kubectl ate` (upstream Substrate's CLI) doesn't work here: kagent runs a fork of Substrate that
+serves a different API, so every call returns `Unimplemented`. kagent 1.0.1 also has no supported way
+to open a shell in an agent's actor. To see the checkout, ask in the transcript, or look at the diff
+on the PR.
 
 ## 3. Walkthrough: a feature, end to end
 
@@ -169,4 +186,4 @@ Jira would plug in the same way: a webhook handler calling the same intake funct
 - **Kargo:** old Freight is harmless. Promote an older Freight to roll a stage back.
 - **Temporal history:** `make dev-stop`, delete `.cache/temporal.db`, `make dev`.
 
-`make stop` pauses the poc cluster; the kargo stack has its own `down.sh`.
+`make stop` pauses every cluster; `make down` deletes the poc cluster and `make kargo-down` the kargo clusters.

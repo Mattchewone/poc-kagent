@@ -60,6 +60,7 @@ PORT = int(os.environ.get("PIPELINE_PORT", "8765"))
 RUNTIME = os.environ.get("APP_RUNTIME", "openshell")  # where verification runs
 WAIT_MAX = float(os.environ.get("WAIT_MAX", "480"))  # stay under the RemoteMCPServer timeout
 PUBLIC_URL = os.environ.get("PIPELINE_PUBLIC_URL", f"http://localhost:{PORT}")
+KAGENT_UI = os.environ.get("KAGENT_UI_URL", f"http://localhost:{os.environ.get('KAGENT_UI_PORT', '8082')}")
 SECRET_FILE = ROOT / ".cache/gitea-webhook-secret"
 _client: Client | None = None
 
@@ -457,7 +458,8 @@ async def work_page(req: Request) -> HTMLResponse:
             "<p class=muted>Everything Temporal recorded for this request: the prompts sent to dev-agent and its replies, "
             "each revision with its test results, the PR and preview it produced, and the release.</p>"
             f"<p class=muted>{e(st.get('kind', ''))} · from {e(st.get('source', ''))} {e(st.get('source_ref', ''))} · {e(wid)}"
-            f"{' · kagent session ' + e(st['session_id']) if st.get('session_id') else ''}</p>"
+            + (f" · <a href='{KAGENT_UI}/agents/{e(st['session_id'])}/chat'>dev-agent transcript</a>" if st.get('session_id') else '')
+            + "</p>"
             f"<div class=card>{_steps(st)}<p><b>Request:</b> {e(st.get('description', ''))}</p>"
             f"<p><b>Phase:</b> <span class=pill>{e(st.get('phase', ''))}</span> "
             f"{e(st.get('result', '') or '')}</p><p>{' &nbsp; '.join(links)}</p></div>{stages}"

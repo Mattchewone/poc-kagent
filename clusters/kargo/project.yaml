@@ -1,4 +1,4 @@
-# Kargo project for demo-todo on the kargo stack (../kargo, hub cluster kargo-hub).
+# Kargo project for demo-todo on the kargo stack (scripts/kargo-up.sh, hub cluster kargo-hub).
 # Applied by scripts/delivery-up.sh. Same shape as the kargo-demo project, but:
 #   - git lives on poc-gitea (http://poc-gitea:3000, on the kind network), not the hub's Gitea
 #   - images come from the worker's release builds (Temporal), not scripts/release.sh

@@ -1,6 +1,6 @@
 # 0017. Delivery through the kargo stack: PR environments on kargo-nonprod, Kargo rolls out releases
 
-- **Status:** Accepted (2026-11-12). Amends [0010](0010-gitea-local-pr.md) (poc-gitea is now the one
+- **Status:** Accepted (2026-11-12), amended by [0019](0019-kargo-stack-in-repo.md) (the kargo stack is now built from this repo). Amends [0010](0010-gitea-local-pr.md) (poc-gitea is now the one
   Gitea for the agent flow, including gitops) and [0015](0015-observability.md) (the main-branch app
   is no longer how changes reach users)
 - **Origin:** Owner (tie into ../kargo as a new project and namespaces, PR previews on

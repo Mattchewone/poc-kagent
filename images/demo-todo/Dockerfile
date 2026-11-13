@@ -8,6 +8,7 @@ ARG VERSION=dev
 ARG GIT_SHA=unknown
 RUN echo "$VERSION" > public/version.txt && echo "$GIT_SHA" > public/commit.txt
 USER node
-ENV PORT=3000 NODE_ENV=production
+# The app shows IMAGE_VERSION (and falls back to "dev"), so bake the build's version into the image.
+ENV PORT=3000 NODE_ENV=production IMAGE_VERSION=$VERSION GIT_SHA=$GIT_SHA
 EXPOSE 3000
 CMD ["node", "src/server.js"]

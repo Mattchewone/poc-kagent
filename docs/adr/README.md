@@ -25,8 +25,9 @@ most worth challenging.
 | [0014](0014-demo-app.md) | Zero-dependency Node todo app with a planted bug | Implementation | Accepted |
 | [0015](0015-observability.md) | `make watch` dashboard and an always-on main-branch app | Owner (goal) / Implementation | Accepted, amended by 0017 |
 | [0016](0016-temporal-owns-the-work-item.md) | Temporal owns each work item end to end, and drives the agent over A2A | Owner / Implementation | Accepted |
-| [0017](0017-kargo-delivery-and-pr-environments.md) | Delivery through the kargo stack: PR environments on kargo-nonprod, Kargo rolls out releases | Owner / Implementation | Accepted |
+| [0017](0017-kargo-delivery-and-pr-environments.md) | Delivery through the kargo stack: PR environments on kargo-nonprod, Kargo rolls out releases | Owner / Implementation | Accepted, amended by 0019 |
 | [0018](0018-agent-identity-on-behalf-of-user.md) | Agents act under their own identity, on behalf of a verified user | Owner / Implementation | Proposed |
+| [0019](0019-kargo-stack-in-repo.md) | The kargo stack (3 clusters + registry) is built from this repo; `make up` brings up everything | Owner / Implementation | Accepted |
 
 To add one: copy the shape of any record, take the next number, and add a row here. Supersede rather
 than rewrite: mark the old record `Superseded by NNNN` and link both ways.

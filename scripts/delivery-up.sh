@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Wire mock-poc into the kargo stack (../kargo): after a PR merges, Temporal builds a
+# Wire mock-poc into the kargo stack (scripts/kargo-up.sh): after a PR merges, Temporal builds a
 # release and Kargo + Argo CD roll it out dev -> staging -> prod. PR previews also run there.
-# Idempotent. Needs the kargo clusters up (KARGO_DIR/scripts/up.sh) and `make gitea`.
+# Idempotent. Needs the kargo clusters up (scripts/kargo-up.sh) and .venv (make setup).
 #
 #   1. poc-gitea on the kind network + webhook          (scripts/gitea-up.sh)
 #   2. deploy/gitops/ -> poc/demo-todo-gitops on poc-gitea
@@ -11,12 +11,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."; source scripts/versions.env; mkdir -p .cache
 PY=.venv/bin/python
-KARGO_DIR=${KARGO_DIR:-../kargo}
 HUB="kubectl --context ${KARGO_HUB_CONTEXT}"
 step() { printf '\033[1;34m==> %s\033[0m\n' "$*"; }
 
 if ! $HUB get ns kargo >/dev/null 2>&1; then
-  echo "kargo hub ($KARGO_HUB_CONTEXT) not reachable. Bring the kargo stack up first: $KARGO_DIR/scripts/up.sh" >&2
+  echo "kargo hub ($KARGO_HUB_CONTEXT) not reachable. Bring it up first: make kargo" >&2
   exit 1
 fi
 

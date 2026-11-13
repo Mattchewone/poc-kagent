@@ -1,6 +1,6 @@
 """Delivery side of a work item: images, PR environments, Kargo stages, and the dev agent over A2A.
 
-Everything here talks to the kargo stack (../kargo, six kind clusters) and to the
+Everything here talks to the kargo stack (scripts/kargo-up.sh: kargo-hub, kargo-nonprod, kargo-prod) and to the
 kagent API, always through explicit kube contexts. The user's current context is never changed.
 
   images        docker build of a Gitea commit with images/demo-todo/Dockerfile (owned by the

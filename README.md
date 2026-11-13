@@ -23,7 +23,7 @@ release out through dev → staging → prod.
 | **Substrate** v1.0.0 (kagent's fork) | runs both agents as gVisor actors; suspends them between turns; egress gateway injects the model key | `kagent-default` WorkerPool |
 | **OpenShell** 0.1.8 | verify sandboxes: landlock, no providers, no network | `clusters/openshell/app-policy.yaml` |
 | **Gitea** (poc-gitea) | app repo, gitops repo, PRs, webhooks to the pipeline | `scripts/gitea-up.sh` |
-| **Kargo + Argo CD** (the kargo stack, `../kargo`) | Argo CD: PR previews on kargo-nonprod · Kargo: owns the release rollout dev → staging → prod | `clusters/kargo/`, `deploy/gitops/` |
+| **Kargo + Argo CD** (the kargo stack: kargo-hub, kargo-nonprod, kargo-prod) | Argo CD: PR previews on kargo-nonprod · Kargo: owns the release rollout dev → staging → prod | `scripts/kargo-up.sh`, `clusters/kargo-stack/`, `clusters/kargo/`, `deploy/gitops/` |
 | **demo-todo** | the target app: zero-dependency Node todo app | `demo-app/` |
 
 Why it's built this way: [docs/adr/](docs/adr/README.md), especially
@@ -46,15 +46,21 @@ environment on kargo-nonprod, built and deployed the way releases are.
 
 ## Quick start
 
+Everything is in this repo; nothing else needs cloning.
+
 ```bash
-make setup                         # python venv
-echo 'ANTHROPIC_API_KEY=sk-ant-…' > .env    # the agents' model key (gitignored)
-make up                            # poc cluster, kagent + Substrate, OpenShell, Gitea, both agents
+make doctor                        # checks docker, kubectl, helm, uv, temporal, openshell, node
+cp .env.example .env               # then set ANTHROPIC_API_KEY (gitignored)
+make up                            # venv, poc cluster (kagent, Substrate, OpenShell), Gitea, both agents,
+                                   #   kargo stack (Argo CD, Kargo), gitops repo, first release, stage URLs
 make dev                           # temporal + worker + pipeline server on the host
-../kargo/scripts/up.sh       # the kargo stack, if it isn't up
-make delivery                      # Kargo project demo-todo, gitops repo, first release, stage URLs
 make demo-ui                       # kagent, work items, Temporal, Gitea, Kargo, Argo CD, dev
 ```
+
+Fresh machine: about 15 min on the first run, mostly image pulls. Give Docker 12+ GiB of memory
+(four kind clusters). `make stop` / `make up` pause and resume everything. `make poc-up`, `make kargo`
+and `make delivery` run one part at a time. If you already run the standalone kargo demo stack, its
+`kargo-hub` / `kargo-nonprod` / `kargo-prod` clusters and `kargo-registry` are reused as they are.
 
 For a guided walkthrough with what to watch at each step, see [docs/DEMO.md](docs/DEMO.md) and run
 `make watch` alongside the chat. Diagrams are in [docs/architecture.md](docs/architecture.md). Who acts as whom: [docs/identity.md](docs/identity.md).
@@ -125,7 +131,7 @@ What changed:
 - **Image cache** (`scripts/image-cache.sh`): after each `make up`, images in the node are exported to `.cache/image-cache/`, and a fresh cluster loads them from disk. Digest-pinned images (kagent, Substrate, OpenShell) can't be exported from containerd here and still download on a fresh cluster. Registry pull-through caches were tried first and dropped: the `registry:2` proxy stalled on large layers.
 - **Pinned tools** in `.cache/bin` (`kind` v0.33, `kagent` CLI). Your global `kind` and current kube context are left alone.
 
-`make down` deletes the cluster but keeps `kind-registry`, the image cache and Gitea.
+`make down` deletes the poc cluster but keeps `kind-registry`, the image cache, Gitea and the kargo stack. `make kargo-down` deletes the three kargo clusters.
 
 ### Gotchas found bringing it up
 

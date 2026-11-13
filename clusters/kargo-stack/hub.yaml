@@ -1,0 +1,14 @@
+# Management cluster: Argo CD, Kargo, Argo Rollouts (runs Kargo's verification AnalysisRuns).
+# Created by scripts/kargo-up.sh. Same name as the standalone kargo stack, so an existing one is reused.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kargo-hub
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - { containerPort: 31443, hostPort: 31443 } # Argo CD UI
+      - { containerPort: 31444, hostPort: 31444 } # Kargo UI
