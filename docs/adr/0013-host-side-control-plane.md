@@ -21,7 +21,6 @@ files and logs in `.cache/`:
 | worker (`worker/main.py`) | n/a | `.cache/worker.log` |
 | pipeline server | 8765 | `.cache/pipeline.log` |
 | claude auth proxy | 8766 | `.cache/claude-proxy.log` |
-| app on main (`scripts/app.sh`) | 3000 | `.cache/app-main.log` |
 
 `make dev APP_RUNTIME=local` runs the whole pipeline with docker previews and no cluster at all, for
 working on the pipeline itself.

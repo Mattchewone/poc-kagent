@@ -195,7 +195,7 @@ def collect_changes() -> list[dict]:
             d = {}
         revs = d.get("revisions", [])
         out.append({"id": wid, "status": w["status"].replace("WORKFLOW_EXECUTION_STATUS_", "").lower(),
-                    "phase": d.get("phase", "") + (f": {d['stage']}" if d.get("stage") else ""),
+                    "phase": d.get("phase", ""),
                     "revs": len(revs), "kind": d.get("kind", ""),
                     "preview": (d.get("preview") or {}).get("url", "") if not (d.get("preview") or {}).get("torn_down") else "",
                     "pr": (d.get("pr") or {}).get("url", ""), "release": (d.get("release") or {}).get("version", ""),

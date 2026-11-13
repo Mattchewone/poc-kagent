@@ -1,6 +1,6 @@
 # 0016. Temporal owns each work item end to end, and drives the agent
 
-- **Status:** Accepted (2026-11-12). Supersedes [0008](0008-temporal-change-workflow.md); replaces the
+- **Status:** Accepted (2026-11-12), amended 2026-11-13 (the workflow ends at the release; see below). Supersedes [0008](0008-temporal-change-workflow.md); replaces the
   tool split in [0009](0009-pipeline-as-mcp-with-gated-pr.md)
 - **Origin:** Owner (Temporal must be critical, not a test harness; the flow is intake → agent →
   PR environment → merge → GitOps rollout; the chat may merge). Mechanisms are implementation choices.
@@ -17,14 +17,14 @@ showed it.
 ## Decision
 
 One **`WorkItemWorkflow`** per request ([worker/work.py](../../worker/work.py)), workflow id =
-work id. It runs from intake until the release is verified in prod, or the item is closed.
+work id. It runs from intake until the release image is pushed, or the item is closed.
 
 ```
 intake ─▶ run_agent ⇄ submit (verify) ─▶ publish_pr ─▶ build_image + deploy_pr_env ─▶ in review
-              ▲                                                                      │
-              └────────────── feedback (chat or a `/agent` PR comment) ◀────────────┤
-                                                                                     ▼ merge
-          wait_for_stage(prod) ◀─ wait_for_stage(staging) ◀─ wait_for_stage(dev) ◀─ release_image
+              ▲                                                                        │
+              └──────── feedback (chat or a `/agent` PR comment) ◀─────────────────────┤
+                                                                                       ▼ merge
+                                                          release_image ─▶ released (Kargo's turn)
 ```
 
 - **Intake is a plain workflow start.** Chat (`start_work`) and Gitea issues (webhook, `/agent` in an
@@ -49,11 +49,10 @@ intake ─▶ run_agent ⇄ submit (verify) ─▶ publish_pr ─▶ build_image
   and preview update in place. `merge` (Update, from the chat's gated tool) merges via the Gitea API.
   `pr_event` (Signal, from the Gitea webhook) covers merges and closes done in the Gitea UI. A 5-minute
   `pr_state` poll is the fallback for a missed webhook.
-- **Delivery is part of the same workflow.** On merge, the workflow tears down the preview, then
+- **The release build is the last step.** On merge, the workflow tears down the preview, then
   `release_image` builds the merge commit as the next semver tag, pushes it, and refreshes the Kargo
-  Warehouse. `wait_for_stage` then waits for each of dev, staging and prod. It is one long activity per
-  stage that polls Kargo and heartbeats, which keeps workflow history small. dev is auto-promoted.
-  staging and prod wait for a promotion, made through the Kargo UI or the gated `promote` Update.
+  Warehouse. The workflow then completes as `released`. Kargo owns dev → staging → prod (see the
+  amendment below).
 - **Two agents.** `dev-agent` only codes, and only Temporal invokes it. `delivery-agent` is the chat
   front door: start, follow, give feedback, abandon. Its `merge_pull_request` and `promote` tools sit
   on a separate MCP server bound with `requireApproval`, so each one needs a human click in kagent.
@@ -64,7 +63,6 @@ intake ─▶ run_agent ⇄ submit (verify) ─▶ publish_pr ─▶ build_image
 | `feedback` | Signal | chat `request_changes`, `/agent` PR comment, `/agent` issue comment |
 | `merge` | Update (validator: in review, no pending feedback) | chat `merge_pull_request` (gated) |
 | `pr_event` | Signal | Gitea webhook: PR merged / closed |
-| `promote` | Update (validator: that stage is next) | chat `promote` (gated) |
 | `abandon` | Signal | chat `abandon_work` |
 | `status` | Query | pages, chat tools, `make watch` |
 
@@ -72,17 +70,32 @@ intake ─▶ run_agent ⇄ submit (verify) ─▶ publish_pr ─▶ build_image
 
 - One Temporal history per request covers everything: the prompt, each agent turn and reply, each
   revision with its tests, the PR, every preview deploy, the merge, the release, and each stage
-  verification. The Temporal UI and `/work/<id>` show all of it.
+  verification. The Temporal UI and `/work/<id>` show all of it. Stage status comes live from Kargo.
 - An agent crash, a worker restart or a slow rollout is a retry or a wait. Nothing is lost.
 - The gates are enforced by the server. A PR only opens for a verified revision. A merge is refused
-  while feedback is pending. A promotion is refused unless that stage is next.
+  while feedback is pending. Kargo refuses a promotion of Freight not verified upstream.
 - Merging no longer waits for an approval click on PR creation: PRs open automatically once a revision
   is verified, because review now happens on the PR and its preview. The human gates are review and
   merge (in Gitea or a gated chat tool), plus the staging and prod promotions.
-- A work item can live for days (review, then manual promotions). Polls are kept infrequent (5-minute
-  PR fallback, stage waits as single heartbeating activities), so history stays in the low hundreds
-  of events. A very long-lived item would want `continue_as_new`, which isn't implemented.
-- `ChangeWorkflow` is still registered so earlier executions can finish, but nothing starts new ones.
+- A work item can live for days while in review. The 5-minute PR poll is the only timer, so history
+  stays small. A very long-lived item would want `continue_as_new`, which isn't implemented.
+- `ChangeWorkflow` was removed (in the same cleanup as the legacy fake-agent stack). Its verify payloads and activities live on in `worker/work.py` / `worker/work_activities.py`.
+
+## Amendment (2026-11-13): stop at the release
+
+The first version also followed the release through Kargo: one `wait_for_stage` activity per stage,
+plus a `promote` Update. The owner asked for Temporal only where it adds something: the
+non-deterministic agent loop, verification, and stitching Gitea, the registry and Argo CD together.
+Waiting on stages added nothing. Kargo already records which Freight is where, verifies each stage
+and gates promotions, so the workflow only mirrored it and held items open for days. Now:
+
+- the workflow completes as `released` once `release_image` has pushed the image and refreshed the
+  Warehouse;
+- the chat's gated `promote(version, stage)` tool creates a Kargo Promotion directly;
+- `release_status(version)` and the work item page read stage status live from Kargo.
+
+Work items recorded before this change can't be replayed by the new code. Their pages link to the
+Temporal UI instead.
 
 ## Alternatives considered
 

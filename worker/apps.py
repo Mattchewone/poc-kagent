@@ -1,7 +1,8 @@
-"""Verify + preview environments. One per revision; the env that verified a diff is the preview.
+"""Verify environments: a fresh sandbox per revision, deleted once the verdict is in.
+(Previews are separate: Argo CD on kargo-nonprod, see worker/delivery.py.)
 
 Both runtimes end up with the same thing: the supervisor (images/app/supervisor.mjs) reachable
-at a localhost URL on the host. The worker POSTs /__poc/verify to it; reviewers open the same URL.
+at a localhost URL on the host. The worker POSTs /__poc/verify to it.
 
   local      docker run, --network none, port published on 127.0.0.1
   openshell  sandbox from the app image, no providers, app-policy.yaml (no egress),
@@ -17,8 +18,8 @@ from pathlib import Path
 
 import httpx
 
-from worker.change import AppEnv
-from worker.runtimes.base import RuntimeError_, sh
+from worker.work import AppEnv
+from worker.shell import RuntimeError_, sh
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_IMAGE = os.environ.get("POC_APP_IMAGE", "mock-poc-app:dev")

@@ -1,4 +1,4 @@
-# Verify + preview sandbox: no providers, no network endpoints -> no egress.
+# Verify sandbox: no providers, no network endpoints -> no egress.
 # Writable: /work (base tree, patched app, test copies) and /tmp. Everything else read-only.
 version: 1
 filesystem_policy:

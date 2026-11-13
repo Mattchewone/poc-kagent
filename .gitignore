@@ -1,7 +1,5 @@
 .venv/
 .cache/
-out/*.patch
-out/results.tsv
 __pycache__/
 .pytest_cache/
 .env

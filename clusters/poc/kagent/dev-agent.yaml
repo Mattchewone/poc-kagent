@@ -8,6 +8,7 @@
 #   RemoteMCPServer  pipeline          /mcp        submit_revision, get_work       (dev-agent)
 #                    delivery          /mcp-chat   start/get/wait/list work, feedback, abandon
 #                    delivery-release  /mcp-gated  merge_pull_request, promote     (requireApproval)
+#                    delivery also has release_status (live Kargo stage status)
 #                    split because the Claude harness gates whole servers, not single tools
 #   Agent dev-agent       the coder. Temporal invokes it over A2A, one session per work item
 #                         (worker/work.py); it never decides when a PR opens or merges.
@@ -79,7 +80,7 @@ metadata:
   name: delivery-release
   namespace: kagent
 spec:
-  description: Merge a work item's PR or promote its release to staging/prod (human approval required).
+  description: Merge a work item's PR, or promote a release to staging/prod in Kargo (human approval required).
   url: http://host.docker.internal:${PIPELINE_PORT}/mcp-gated
   protocol: STREAMABLE_HTTP
   timeout: 5m

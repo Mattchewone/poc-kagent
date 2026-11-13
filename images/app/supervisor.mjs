@@ -1,31 +1,29 @@
 #!/usr/bin/env node
-// Verify + preview supervisor. Runs in a fresh sandbox with no network and no credentials.
+// Verify supervisor. Runs in a fresh OpenShell sandbox with no network and no credentials, one per
+// revision; the worker deletes the sandbox once it has the verdict. (PR previews run on kargo-nonprod.)
 //
 //   POST /__poc/verify  {base_tar_b64, diff}  -> apply diff to a clean copy of base, restore base
-//                                                tests, run `node --test`; on success start the app
+//                                                tests, run `node --test` twice, return the verdict
 //   GET  /__poc/status                         -> {state, verify}
-//   GET  /readyz                               -> 200 (Substrate wakeup probe)
-//   anything else                              -> proxied to the app on APP_PORT once it is running
+//   GET  /readyz                               -> 200 (the worker's readiness probe)
 //
 // Two test runs, both must pass:
 //   1. the agent's tree as written, so the tests it added count;
 //   2. a copy with every base file under tests/ restored, so it cannot weaken existing tests.
 // tests_touched flags removed/changed lines in test files that exist on base (informational).
-import { createServer, request } from "node:http";
-import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
+import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const PORT = Number(process.argv[2] ?? process.env.PORT ?? 8080);
-const APP_PORT = Number(process.env.APP_PORT ?? 3000);
 const WORK = process.env.WORK_DIR ?? "/work";
 const BASE = join(WORK, "base");
 const APP = join(WORK, "app");
 const GRADED = join(WORK, "graded");
 
-let state = "idle"; // idle | verifying | failed | starting | running
+let state = "idle"; // idle | verifying | passed | failed
 let lastVerify = null;
-let child = null;
 
 const log = (...a) => console.error("[supervisor]", ...a);
 
@@ -64,7 +62,6 @@ const counts = (out) => ({
 
 async function verify({ base_tar_b64, diff = "" }) {
   if (!base_tar_b64) throw new Error("base_tar_b64 is required");
-  stopApp();
   state = "verifying";
   // Empty WORK rather than removing it: the sandbox user owns its contents, not the directory's parent.
   mkdirSync(WORK, { recursive: true });
@@ -100,57 +97,14 @@ async function verify({ base_tar_b64, diff = "" }) {
     base_tests: { ...counts(graded.out), ok: graded.code === 0 },
     output: `# agent's tests\n${agent.out.slice(-3000)}\n# base tests restored\n${graded.out.slice(-3000)}`,
   });
-  lastVerify = result;
-  if (!result.passed) {
-    state = "failed";
-    return result;
-  }
-  await startApp();
-  return result;
-}
-
-function startApp() {
-  state = "starting";
-  child = spawn("node", ["src/server.js"], { cwd: APP, env: { ...process.env, PORT: String(APP_PORT) }, stdio: "inherit" });
-  child.on("exit", (code) => {
-    log(`app exited ${code}`);
-    if (state === "running" || state === "starting") state = "failed";
-    child = null;
-  });
-  return new Promise((resolve) => {
-    const deadline = Date.now() + 15_000;
-    const probe = () => {
-      const req = request({ host: "127.0.0.1", port: APP_PORT, path: "/", method: "GET" }, (res) => {
-        res.resume();
-        state = "running";
-        resolve();
-      });
-      req.on("error", () => (Date.now() > deadline ? resolve() : setTimeout(probe, 200)));
-      req.end();
-    };
-    probe();
-  });
-}
-
-function stopApp() {
-  if (child) child.kill("SIGTERM");
-  child = null;
+  state = result.passed ? "passed" : "failed";
+  return (lastVerify = result);
 }
 
 function json(res, code, body) {
   const data = JSON.stringify(body);
   res.writeHead(code, { "content-type": "application/json", "content-length": Buffer.byteLength(data) });
   res.end(data);
-}
-
-function proxy(req, res) {
-  if (state !== "running") return json(res, 503, { error: `preview not running (state=${state})`, verify: lastVerify });
-  const up = request({ host: "127.0.0.1", port: APP_PORT, path: req.url, method: req.method, headers: req.headers }, (r) => {
-    res.writeHead(r.statusCode ?? 502, r.headers);
-    r.pipe(res);
-  });
-  up.on("error", (e) => json(res, 502, { error: String(e) }));
-  req.pipe(up);
 }
 
 createServer(async (req, res) => {
@@ -163,10 +117,10 @@ createServer(async (req, res) => {
       for await (const c of req) raw += c;
       return json(res, 200, await verify(JSON.parse(raw || "{}")));
     }
-    return proxy(req, res);
+    return json(res, 404, { error: "not found" });
   } catch (e) {
     log("error", e);
     state = state === "verifying" ? "failed" : state;
     return json(res, 500, { error: String(e?.message ?? e) });
   }
-}).listen(PORT, "0.0.0.0", () => log(`listening on :${PORT}, app on :${APP_PORT}`));
+}).listen(PORT, "0.0.0.0", () => log(`listening on :${PORT}`));

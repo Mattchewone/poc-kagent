@@ -28,7 +28,7 @@ They did not conflict.
 - Faster bring-up, and kagent and OpenShell can install in parallel ([0002](0002-fast-startup.md)).
 - A single node means everything shares the Docker Desktop VM's CPU and memory. Fine for a demo; not
   a statement about production topology.
-- The old two-cluster stack is kept as `make legacy-up` for the earlier experiments.
+- The old two-cluster stack (fake agent, milestones 1-8) has since been removed; it is in git history before this cleanup.
 
 ## Alternatives considered
 

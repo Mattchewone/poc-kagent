@@ -1,15 +1,15 @@
-"""Activities for WorkItemWorkflow (worker/work.py). verify uses the ChangeWorkflow activities
-(start_app_env / verify_change / stop_app_env in change_activities.py) unchanged."""
+"""Activities for WorkItemWorkflow (worker/work.py). Kept out of the workflow module because they
+touch git, docker, kubectl, OpenShell, kagent and the filesystem."""
 from __future__ import annotations
 
 import asyncio
 
 from temporalio import activity
 
-from worker import delivery, gitea
+from worker import apps, delivery, gitea
 from worker.work import (
-    AgentTurnInput, AgentTurnResult, CommentInput, ImageInput, PrEnv, PrEnvInput, PrInfo, PublishInput,
-    ReleaseInput, StageInput,
+    AppEnv, StartAppInput, VerifyInput, VerifyResult, AgentTurnInput, AgentTurnResult, CommentInput, ImageInput, PrEnv, PrEnvInput, PrInfo, PublishInput,
+    ReleaseInput,
 )
 
 
@@ -26,6 +26,35 @@ async def _heartbeating(coro, every: float = 20, detail: str = ""):
         if not task.done():
             task.cancel()
 
+
+# ---- verification (fresh OpenShell sandbox per revision) ------------------------
+
+@activity.defn
+async def start_app_env(inp: StartAppInput) -> AppEnv:
+    return await apps.APPS[inp.runtime].start(inp.change_id, inp.n)
+
+
+@activity.defn
+async def verify_change(inp: VerifyInput) -> VerifyResult:
+    base = await gitea.base("main")
+    problem = await gitea.check_applies(base.sha, inp.diff) if inp.diff.strip() else "empty diff"
+    if problem:
+        return VerifyResult(passed=False, base_sha=base.sha, error=f"diff does not apply to main@{base.sha[:8]}: {problem}")
+    res = await apps.verify(inp.env, base.tar_b64, inp.diff)
+    return VerifyResult(
+        passed=bool(res.get("passed")), base_sha=base.sha, output=res.get("output", "")[-6000:],
+        agent_tests=res.get("agent_tests", {}), base_tests=res.get("base_tests", {}),
+        tests_touched=bool(res.get("tests_touched")), weakened=res.get("weakened", []),
+        touched=res.get("touched", []),
+    )
+
+
+@activity.defn
+async def stop_app_env(env: AppEnv) -> None:
+    await apps.APPS[env.runtime].stop(env)
+
+
+# ---- the agent, PRs, previews, releases ---------------------------------------
 
 @activity.defn
 async def run_agent(inp: AgentTurnInput) -> AgentTurnResult:
@@ -111,23 +140,6 @@ async def release_image(inp: ReleaseInput) -> dict:
     return await _heartbeating(delivery.release(inp.merge_sha, inp.kind), detail=f"release of {inp.merge_sha[:8]}")
 
 
-@activity.defn
-async def wait_for_stage(inp: StageInput) -> dict:
-    """Poll Kargo until this version is verified in the stage (or fails there). Heartbeats every poll."""
-    while True:
-        st = await delivery.stage_status(inp.stage, inp.version)
-        activity.heartbeat(st)
-        if st["state"] == "verified":
-            return {**st, "verified": True, "url": delivery.stage_url(inp.stage)}
-        if st["state"] == "failed":
-            return {**st, "verified": False}
-        await asyncio.sleep(10)
 
-
-@activity.defn
-async def promote_stage(inp: StageInput) -> dict:
-    return await delivery.promote(inp.stage, inp.version)
-
-
-ACTIVITIES = [run_agent, publish_pr, build_image, deploy_pr_env, teardown_pr_env, comment_pr, pr_state,
-              merge_pr, close_pr, release_image, wait_for_stage, promote_stage]
+ACTIVITIES = [start_app_env, verify_change, stop_app_env, run_agent, publish_pr, build_image, deploy_pr_env, teardown_pr_env, comment_pr, pr_state,
+              merge_pr, close_pr, release_image]

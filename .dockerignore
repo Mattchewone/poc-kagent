@@ -1,5 +1,4 @@
 .venv
-out
 clusters
 worker
 tests

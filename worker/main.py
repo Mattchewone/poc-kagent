@@ -1,4 +1,4 @@
-"""Worker process. Runs on the host; reaches the runtimes via port-forwards and kube contexts."""
+"""Worker process. Runs on the host; reaches kagent, OpenShell, Gitea and the kargo clusters from here."""
 from __future__ import annotations
 
 import asyncio
@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from temporalio.client import Client  # noqa: E402
 from temporalio.worker import Worker  # noqa: E402
 
-from worker import activities, change, change_activities, work, work_activities  # noqa: E402
-from worker.workflow import TASK_QUEUE, FeatureWorkflow  # noqa: E402
+from worker import work_activities  # noqa: E402
+from worker.work import WORK_QUEUE, WorkItemWorkflow  # noqa: E402
 
 
 async def main() -> None:
@@ -22,9 +22,8 @@ async def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     client = await Client.connect(os.environ.get("TEMPORAL_ADDRESS", "localhost:7233"))
-    worker = Worker(client, task_queue=TASK_QUEUE, workflows=[FeatureWorkflow, change.ChangeWorkflow, work.WorkItemWorkflow],
-                    activities=activities.ALL + change_activities.ACTIVITIES + work_activities.ACTIVITIES)
-    logging.getLogger("poc").info("worker up on task queue %s (pid %s)", TASK_QUEUE, os.getpid())
+    worker = Worker(client, task_queue=WORK_QUEUE, workflows=[WorkItemWorkflow], activities=work_activities.ACTIVITIES)
+    logging.getLogger("poc").info("worker up on task queue %s (pid %s)", WORK_QUEUE, os.getpid())
     await worker.run()
 
 

@@ -1,6 +1,6 @@
 # 0015. `make watch` dashboard and an always-on main-branch app
 
-- **Status:** Accepted (2026-11-12), amended by [0017](0017-kargo-delivery-and-pr-environments.md): releases reach users through Kargo stages (:31081-31083); the main-branch app on :3000 is only a quick look at `main`
+- **Status:** Accepted (2026-11-12), amended by [0017](0017-kargo-delivery-and-pr-environments.md): releases reach users through Kargo stages (:31081-31083); the main-branch app (`make app`, :3000) has been removed
 - **Origin:** Owner asked to see actors "working up and down" alongside Temporal and Gitea, in
   sections, and to see the app before asking for a change; the mechanisms are implementation choices
 

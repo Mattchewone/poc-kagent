@@ -5,8 +5,8 @@
 MCP (streamable HTTP). Three endpoints, because kagent's Claude harness gates whole servers, not tools:
   /mcp         dev-agent      submit_revision, get_work                         (Temporal invokes it)
   /mcp-chat    delivery-agent start_work, get_work, wait_for_work, list_work,
-                              request_changes, abandon_work                     (no approval)
-  /mcp-gated   delivery-agent merge_pull_request, promote                       (requireApproval)
+                              request_changes, abandon_work, release_status     (no approval)
+  /mcp-gated   delivery-agent merge_pull_request (Temporal), promote (Kargo)      (requireApproval)
 
 Webhooks:
   /hooks/gitea   pull_request closed/merged -> Signal pr_event
@@ -15,7 +15,8 @@ Webhooks:
 
 Pages:
   /              work items
-  /work/<id>     phase, agent turns, revisions + test results, PR, preview, release, stages
+  /work/<id>     one work item: agent turns, revisions + test results, PR, preview, release
+                 (stage status read live from Kargo)
 """
 from __future__ import annotations
 
@@ -41,15 +42,16 @@ from starlette.applications import Starlette  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import HTMLResponse, JSONResponse  # noqa: E402
 from starlette.routing import Route  # noqa: E402
-from temporalio.client import Client, WorkflowExecutionStatus, WorkflowUpdateFailedError  # noqa: E402
+from temporalio.client import (  # noqa: E402
+    Client, WorkflowExecutionStatus, WorkflowQueryFailedError, WorkflowUpdateFailedError,
+)
 from temporalio.common import WorkflowIDReusePolicy  # noqa: E402
 from temporalio.exceptions import WorkflowAlreadyStartedError  # noqa: E402
 from temporalio.service import RPCError  # noqa: E402
 
 from worker import delivery, gitea  # noqa: E402
-from worker.change import Revision  # noqa: E402
 from worker.work import (  # noqa: E402
-    HUMAN_PHASES, STAGES, WORK_QUEUE, Feedback, PrEvent, WorkItemWorkflow, WorkRequest, summarize,
+    HUMAN_PHASES, WORK_QUEUE, Feedback, PrEvent, Revision, WorkItemWorkflow, WorkRequest, summarize,
 )
 
 log = logging.getLogger("poc.pipeline")
@@ -71,6 +73,11 @@ async def client() -> Client:
 
 def _slug(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24].strip("-") or "work"
+
+
+# A query replays the workflow's history; an item recorded by an older version of WorkItemWorkflow
+# may not replay any more (nondeterminism), so treat that like "status unavailable".
+QUERY_ERRORS = (RPCError, WorkflowQueryFailedError)
 
 
 async def _status(work_id: str) -> dict:
@@ -148,38 +155,37 @@ async def start_work(title: str, description: str, kind: str = "feature") -> dic
         return {"error": "kind must be 'feature' or 'bug'"}
     work_id = await start_work_item(title, description, kind, source="chat", requested_by="chat")
     return _links(work_id, {"work_id": work_id, "phase": "queued",
-                            "next": "call wait_for_work to block until it needs a human (review, input, promotion)"})
+                            "next": "call wait_for_work to block until it needs a human (input, review) or is released"})
 
 
 @chat_mcp.tool()
 async def get_work(work_id: str) -> dict:
-    """Current phase, PR, preview URL, release version and stage status of a work item."""
+    """Current phase, PR, preview URL and release version of a work item."""
     try:
         return _links(work_id, summarize(await _status(work_id)))
-    except RPCError as e:
+    except QUERY_ERRORS as e:
         return {"error": f"unknown work item {work_id}: {e}"}
 
 
 @chat_mcp.tool()
 async def wait_for_work(work_id: str, timeout_s: int = 420) -> dict:
-    """Block until the work item needs a human (in review, needs input, awaiting promotion, done, closed)
-    or its stage changes, at most timeout_s (<= 480) seconds. Call again if it returns still working."""
+    """Block until the work item needs a human (needs input, in review) or ends (released, closed), at most timeout_s (<= 480) seconds. Call again if it returns still working."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + min(float(timeout_s), WAIT_MAX)
     h = (await client()).get_workflow_handle(work_id)
     try:
         first = await h.query(WorkItemWorkflow.status)
-    except RPCError as e:
+    except QUERY_ERRORS as e:
         return {"error": f"unknown work item {work_id}: {e}"}
-    start_key = (first.get("phase"), first.get("stage"), len(first.get("revisions", [])))
+    start_key = (first.get("phase"), len(first.get("revisions", [])))
     st = first
     while loop.time() < deadline:
         await asyncio.sleep(2)
         try:
             st = await h.query(WorkItemWorkflow.status)
-        except RPCError:
+        except QUERY_ERRORS:
             continue
-        key = (st.get("phase"), st.get("stage"), len(st.get("revisions", [])))
+        key = (st.get("phase"), len(st.get("revisions", [])))
         if st.get("phase") in HUMAN_PHASES and key != start_key:
             break
         if st.get("phase") in HUMAN_PHASES and first.get("phase") not in HUMAN_PHASES:
@@ -196,9 +202,9 @@ async def list_work(limit: int = 10) -> dict:
     items = []
     async for wf in (await client()).list_workflows("WorkflowType='WorkItemWorkflow'", limit=limit):
         entry = {"work_id": wf.id, "workflow": wf.status.name.lower()}
-        with contextlib.suppress(RPCError):
+        with contextlib.suppress(*QUERY_ERRORS):
             st = await _status(wf.id)
-            entry.update(title=st.get("title"), phase=st.get("phase"), stage=st.get("stage"), pr=st.get("pr", {}).get("url"))
+            entry.update(title=st.get("title"), phase=st.get("phase"), pr=st.get("pr", {}).get("url"))
         items.append({k: v for k, v in entry.items() if v})
     return {"work": items}
 
@@ -215,6 +221,13 @@ async def request_changes(work_id: str, feedback: str) -> dict:
 
 
 @chat_mcp.tool()
+async def release_status(version: str) -> dict:
+    """Where release `version` is in dev / staging / prod, read live from Kargo."""
+    return {"version": version, "stages": await delivery.release_status(version),
+            "kargo": "https://localhost:31444/project/demo-todo"}
+
+
+@chat_mcp.tool()
 async def abandon_work(work_id: str, reason: str = "") -> dict:
     """Stop a work item: the PR is closed and its preview environment deleted."""
     await (await client()).get_workflow_handle(work_id).signal(WorkItemWorkflow.abandon, reason)
@@ -225,7 +238,7 @@ async def abandon_work(work_id: str, reason: str = "") -> dict:
 
 gated_mcp = FastMCP("delivery-release", stateless_http=True, json_response=True, streamable_http_path="/mcp-gated",
                     transport_security=_security,
-                    instructions="Merge a reviewed PR, or promote a release to the next stage. Each call needs human approval.")
+                    instructions="Merge a reviewed PR, or promote a release to staging/prod. Each call needs human approval.")
 
 
 @gated_mcp.tool()
@@ -237,20 +250,21 @@ async def merge_pull_request(work_id: str) -> dict:
         out = await h.execute_update(WorkItemWorkflow.merge, "chat")
     except (WorkflowUpdateFailedError, RPCError) as e:
         return {"error": _err(e)}
-    return _links(work_id, {"work_id": work_id, **out, "next": "the release builds now; wait_for_work follows it to dev"})
+    return _links(work_id, {"work_id": work_id, **out, "next": "the release builds now; wait_for_work returns when it is pushed"})
 
 
 @gated_mcp.tool()
-async def promote(work_id: str, stage: str) -> dict:
-    """Promote the work item's release to `stage` (staging or prod) through Kargo. A human must approve this call."""
-    if stage not in STAGES:
-        return {"error": f"stage must be one of {', '.join(STAGES)}"}
-    h = (await client()).get_workflow_handle(work_id)
+async def promote(version: str, stage: str) -> dict:
+    """Promote release `version` (e.g. 0.2.0) to `stage` (staging or prod) by creating a Kargo Promotion.
+    Kargo refuses Freight not yet verified in the previous stage. A human must approve this call."""
+    if stage not in delivery.STAGES:
+        return {"error": f"stage must be one of {', '.join(delivery.STAGES)}"}
     try:
-        out = await h.execute_update(WorkItemWorkflow.promote, stage)
-    except (WorkflowUpdateFailedError, RPCError) as e:
-        return {"error": _err(e)}
-    return _links(work_id, {"work_id": work_id, "stage": stage, **out, "url": delivery.stage_url(stage)})
+        out = await delivery.promote(stage, version)
+    except Exception as e:  # noqa: BLE001 - relay Kargo's reason to the chat
+        return {"error": str(e)[:500]}
+    return {"version": version, "stage": stage, **out, "url": delivery.stage_url(stage),
+            "next": "call release_status to see it verified"}
 
 
 # ---- Gitea webhook ---------------------------------------------------------
@@ -340,8 +354,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 .steps span.on{border-color:var(--accent);color:var(--accent);font-weight:600}.steps span.did{color:var(--ok);border-color:var(--ok)}
 details summary{cursor:pointer}
 """
-STEPS = ["agent working", "opening pr", "deploying preview", "in review", "merging", "building release",
-         "dev", "staging", "prod", "done"]
+STEPS = ["agent working", "opening pr", "deploying preview", "in review", "merging", "building release", "released"]
 
 
 def _page(title: str, body: str, refresh: bool = False) -> HTMLResponse:
@@ -354,15 +367,17 @@ async def index(_: Request) -> HTMLResponse:
     rows = []
     async for wf in (await client()).list_workflows("WorkflowType='WorkItemWorkflow'", limit=50):
         phase = ""
-        with contextlib.suppress(RPCError):
+        with contextlib.suppress(*QUERY_ERRORS):
             st = await _status(wf.id)
-            phase = st.get("phase", "") + (f": {st['stage']}" if st.get("stage") else "")
+            phase = st.get("phase", "")
         rows.append(f"<tr><td><a href='/work/{wf.id}'>{html.escape(wf.id)}</a></td><td>{html.escape(phase)}</td>"
                     f"<td>{wf.status.name.lower()}</td><td class=muted>{wf.start_time:%Y-%m-%d %H:%M}</td></tr>")
     table = "<table><tr><th>Work item</th><th>Phase</th><th>Workflow</th><th>Started</th></tr>" + "".join(rows) + "</table>" if rows \
         else "<p class=muted>No work items yet. Ask delivery-agent in the kagent UI, or open a Gitea issue with <code>/agent</code> in it.</p>"
-    return _page("Work items", "<h1>Work items</h1><p class=muted>Each one is a Temporal WorkItemWorkflow, from request to prod. "
-                 "<a href='http://localhost:8233'>Temporal UI</a></p>" + f"<div class=card>{table}</div>")
+    return _page("Work items", "<h1>Work items</h1><p class=muted>One row per request to the coding agent: what it is doing now, "
+                 "and a page with its prompts, every revision it submitted with test results, the PR, the preview and the release. "
+                 "A readable view of the Temporal workflow (<a href='http://localhost:8233'>raw history in the Temporal UI</a>).</p>"
+                 + f"<div class=card>{table}</div>")
 
 
 def _tests(v: dict) -> str:
@@ -375,12 +390,11 @@ def _tests(v: dict) -> str:
 
 
 def _steps(st: dict) -> str:
-    cur = st.get("stage") or st.get("phase", "")
+    cur = st.get("phase", "")
     if st.get("phase") in ("needs input",):
         cur = "agent working"
     idx = STEPS.index(cur) if cur in STEPS else -1
-    if st.get("phase") == "done":
-        idx = len(STEPS) - 1
+
     out = []
     for i, s in enumerate(STEPS):
         cls = "on" if i == idx else ("did" if 0 <= i < idx else "")
@@ -393,6 +407,11 @@ async def work_page(req: Request) -> HTMLResponse:
     h = (await client()).get_workflow_handle(wid)
     try:
         st = await h.query(WorkItemWorkflow.status)
+    except WorkflowQueryFailedError:
+        return _page(wid, f"<p class=muted><a href='/'>← all work items</a></p><h1>{html.escape(wid)}</h1>"
+                     "<div class=card><p>This work item was recorded by an older version of the workflow and can't be "
+                     f"read with the current code. Its full history is in the <a href='http://localhost:8233/namespaces/default/workflows/"
+                     f"{html.escape(wid)}'>Temporal UI</a>.</p></div>")
     except RPCError:
         return _page("Not found", f"<h1>Unknown work item</h1><p>{html.escape(wid)}</p>")
     running = (await h.describe()).status == WorkflowExecutionStatus.RUNNING
@@ -409,14 +428,16 @@ async def work_page(req: Request) -> HTMLResponse:
     rel = st.get("release") or {}
     stages = ""
     if rel:
+        live = await delivery.release_status(rel["version"])
         cells = []
-        for s in STAGES:
-            info = st.get("stages", {}).get(s, {})
-            state = "verified" if info.get("verified") else (info.get("message") or ("in progress" if st.get("stage") == s else "pending"))
-            cells.append(f"<td><b>{s}</b><br><a href='{delivery.stage_url(s)}' target=_blank>{delivery.stage_url(s)}</a><br>"
-                         f"<span class='{'ok' if info.get('verified') else 'muted'}'>{e(state)}</span></td>")
+        for s, info in live.items():
+            ok = info.get("state") == "verified"
+            cells.append(f"<td><b>{s}</b><br><a href='{info['url']}' target=_blank>{info['url']}</a><br>"
+                         f"<span class='{'ok' if ok else 'muted'}'>{e(info.get('state', ''))}"
+                         f"{'' if ok else ': ' + e(info.get('message', ''))}</span></td>")
         stages = (f"<div class=card><h3 style='margin-top:0'>Release {e(rel.get('version', ''))}</h3>"
                   f"<p class=muted>{e(rel.get('image', ''))} · merge {e(st.get('merge_sha', '')[:8])} · "
+                  "rollout is Kargo's job; live status from Kargo · "
                   f"<a href='https://localhost:31444/project/demo-todo' target=_blank>Kargo →</a></p><table><tr>{''.join(cells)}</tr></table></div>")
     revs = []
     for r in reversed(st.get("revisions", [])):
@@ -431,11 +452,14 @@ async def work_page(req: Request) -> HTMLResponse:
                     f"<p class=muted>Prompt</p><pre>{e(t.get('prompt', ''))}</pre><p class=muted>Reply</p><pre>{e(t.get('reply', ''))}</pre></details>"
                     for t in reversed(st.get("turns", [])))
     log_rows = "".join(f"<tr><td class=muted>{e(x['at'][11:19])}</td><td>{e(x['msg'])}</td></tr>" for x in reversed(st.get("log", [])))
-    body = (f"<p class=muted><a href='/'>← all work items</a></p><h1>{e(st.get('title', wid))}</h1>"
+    body = (f"<p class=muted><a href='/'>← all work items</a></p><p class=muted style='margin:0'>Work item</p>"
+            f"<h1>{e(st.get('title', wid))}</h1>"
+            "<p class=muted>Everything Temporal recorded for this request: the prompts sent to dev-agent and its replies, "
+            "each revision with its test results, the PR and preview it produced, and the release.</p>"
             f"<p class=muted>{e(st.get('kind', ''))} · from {e(st.get('source', ''))} {e(st.get('source_ref', ''))} · {e(wid)}"
             f"{' · kagent session ' + e(st['session_id']) if st.get('session_id') else ''}</p>"
             f"<div class=card>{_steps(st)}<p><b>Request:</b> {e(st.get('description', ''))}</p>"
-            f"<p><b>Phase:</b> <span class=pill>{e(st.get('phase', ''))}{': ' + e(st['stage']) if st.get('stage') else ''}</span> "
+            f"<p><b>Phase:</b> <span class=pill>{e(st.get('phase', ''))}</span> "
             f"{e(st.get('result', '') or '')}</p><p>{' &nbsp; '.join(links)}</p></div>{stages}"
             + "".join(revs)
             + (f"<div class=card><h3 style='margin-top:0'>Agent turns (A2A)</h3>{turns}</div>" if turns else "")
@@ -444,7 +468,10 @@ async def work_page(req: Request) -> HTMLResponse:
 
 
 async def work_json(req: Request) -> JSONResponse:
-    return JSONResponse(await _status(req.path_params["wid"]))
+    try:
+        return JSONResponse(await _status(req.path_params["wid"]))
+    except QUERY_ERRORS as e:
+        return JSONResponse({"error": str(e)[:300]}, status_code=404)
 
 
 async def healthz(_: Request) -> JSONResponse:

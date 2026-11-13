@@ -14,7 +14,7 @@ from pathlib import Path
 
 import httpx
 
-from worker.runtimes.base import sh
+from worker.shell import sh
 
 ROOT = Path(__file__).resolve().parents[1]
 

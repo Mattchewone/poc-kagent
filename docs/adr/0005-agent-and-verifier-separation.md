@@ -23,7 +23,13 @@ can make any change "pass" (the earlier POC's `cheat` scenario demonstrated this
 - **A separate verifier** runs every submitted revision in a fresh environment the agent has no
   access to, with no network and no credentials, applying only the diff to a clean checkout of `main`
   ([0006](0006-openshell-verify-and-preview.md), [0007](0007-verification-rule.md)).
-- The agent's only way to ship is `submit_change`; it cannot push to Gitea.
+- The agent's only way to ship is `submit_revision`; it cannot push to Gitea.
+- The agent's sandbox lives for the whole work item: one kagent session, the same checkout, suspended
+  while it waits for review or input. The verifier is not a second workspace. It is the check that
+  gates the PR, so that gate never relies on test results the agent produced itself.
+- `submit_revision` blocks and returns the verdict inside the agent's turn, so the agent can fix and
+  resubmit while it still has the context. The alternative is ending the turn, suspending, and being
+  woken with a new prompt.
 
 ## Consequences
 
@@ -38,3 +44,6 @@ can make any change "pass" (the earlier POC's `cheat` scenario demonstrated this
 - **Fix agent + test agent.** Rejected for the latency and context loss above.
 - **Trust the agent's own test run.** Rejected: no defence against weakened tests or environment
   drift.
+- **Verify in the agent's sandbox, then rely on CI on the PR** (the common software-factory shape).
+  It's viable and saves a sandbox per revision, but PRs can then open for unverified code. Our
+  verifier is effectively CI that runs before the PR exists.

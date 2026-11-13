@@ -18,10 +18,10 @@ from temporalio.worker import Worker
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from worker.change import AppEnv, Revision, StartAppInput, VerifyInput, VerifyResult  # noqa: E402
 from worker.work import (  # noqa: E402
-    AWAITING, CLOSED, DONE, IN_REVIEW, NEEDS_INPUT, AgentTurnInput, AgentTurnResult, CommentInput, Feedback,
-    ImageInput, PrEnv, PrEnvInput, PrEvent, PrInfo, PublishInput, ReleaseInput, StageInput, WorkItemWorkflow,
+    CLOSED, DONE, IN_REVIEW, NEEDS_INPUT, AppEnv, Revision, StartAppInput, VerifyInput, VerifyResult,
+    AgentTurnInput, AgentTurnResult, CommentInput, Feedback,
+    ImageInput, PrEnv, PrEnvInput, PrEvent, PrInfo, PublishInput, ReleaseInput, WorkItemWorkflow,
     WorkRequest, summarize,
 )
 
@@ -42,7 +42,6 @@ class Stubs:
         self.merged: list[int] = []
         self.closed: list[int] = []
         self.releases: list[ReleaseInput] = []
-        self.promoted: set[str] = set()
 
     def activities(self):
         @activity.defn(name="start_app_env")
@@ -112,20 +111,8 @@ class Stubs:
             self.releases.append(inp)
             return {"version": "0.2.0", "image": "kargo-registry:5000/demo-todo:0.2.0", "sha": inp.merge_sha}
 
-        @activity.defn(name="wait_for_stage")
-        async def wait_for_stage(inp: StageInput) -> dict:
-            while inp.stage != "dev" and inp.stage not in self.promoted:
-                activity.heartbeat()
-                await asyncio.sleep(0.1)
-            return {"state": "verified", "verified": True, "freight": "f1"}
-
-        @activity.defn(name="promote_stage")
-        async def promote_stage(inp: StageInput) -> dict:
-            self.promoted.add(inp.stage)
-            return {"promotion": f"{inp.stage}-abc", "freight": "f1"}
-
         return [start_app_env, verify_change, stop_app_env, run_agent, publish_pr, build_image, deploy_pr_env,
-                teardown_pr_env, comment_pr, pr_state, merge_pr, close_pr, release_image, wait_for_stage, promote_stage]
+                teardown_pr_env, comment_pr, pr_state, merge_pr, close_pr, release_image]
 
 
 async def wait_for(h, pred, timeout: float = 20) -> dict:
@@ -149,8 +136,8 @@ def run(turns, case):
     asyncio.run(main())
 
 
-def test_request_to_prod():
-    """fail -> fix -> PR + preview -> feedback -> revision updates the same PR -> merge -> dev -> staging -> prod"""
+def test_request_to_release():
+    """fail -> fix -> PR + preview -> feedback -> revision updates the same PR -> merge -> release (then Kargo's job)"""
     async def case(h, s: Stubs):
         st = await wait_for(h, lambda st: st["phase"] == IN_REVIEW)
         assert [r["passed"] for r in st["revisions"]] == [False, True]
@@ -168,18 +155,10 @@ def test_request_to_prod():
 
         out = await h.execute_update(WorkItemWorkflow.merge, "chat")
         assert out["merge_sha"] == "m" * 40 and s.merged == [7]
-        st = await wait_for(h, lambda st: st["phase"] == AWAITING and st.get("stage") == "staging")
-        assert s.torn_down == ["demo-todo-pr-7"] and s.releases[0].merge_sha == "m" * 40
-        assert st["stages"]["dev"]["verified"] and summarize(st)["release"] == "0.2.0"
-
-        with pytest.raises(WorkflowUpdateFailedError):  # prod is not next
-            await h.execute_update(WorkItemWorkflow.promote, "prod")
-        await h.execute_update(WorkItemWorkflow.promote, "staging")
-        await wait_for(h, lambda st: st["phase"] == AWAITING and st.get("stage") == "prod")
-        await h.execute_update(WorkItemWorkflow.promote, "prod")
-        assert await h.result() == "0.2.0 live in prod"
+        assert await h.result() == "0.2.0 released; Kargo rolls it out"
         st = await h.query(WorkItemWorkflow.status)
-        assert st["phase"] == DONE and set(st["stages"]) == {"dev", "staging", "prod"}
+        assert st["phase"] == DONE and s.torn_down == ["demo-todo-pr-7"] and s.releases[0].merge_sha == "m" * 40
+        assert summarize(st)["release"] == "0.2.0" and "Released as" in s.comments[-1]
 
     run([["bad", "good v1"], ["good v2"]], case)
 
@@ -193,10 +172,8 @@ def test_agent_question_then_merge_in_gitea():
         await wait_for(h, lambda st: st["phase"] == IN_REVIEW)
         assert "blue" in s.prompts[1]
         await h.signal(WorkItemWorkflow.pr_event, PrEvent("merged", "w" * 40, "matt"))
-        await wait_for(h, lambda st: st["phase"] == AWAITING)
+        assert await h.result() == "0.2.0 released; Kargo rolls it out"
         assert s.merged == [] and s.releases[0].merge_sha == "w" * 40 and s.torn_down == ["demo-todo-pr-7"]
-        await h.signal(WorkItemWorkflow.abandon, "enough for this test")  # ignored after merge: still awaiting
-        await h.terminate("test over")
 
     run([[], ["good"]], case)
 

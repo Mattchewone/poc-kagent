@@ -1,6 +1,6 @@
 # 0008. A Temporal workflow owns each change
 
-- **Status:** Superseded by [0016](0016-temporal-owns-the-work-item.md) (2026-11-12). `ChangeWorkflow` stays registered so earlier executions can finish
+- **Status:** Superseded by [0016](0016-temporal-owns-the-work-item.md) (2026-11-12). `ChangeWorkflow` has since been removed; links below point at files that no longer exist
 - **Origin:** Implementation (Temporal was already the earlier POC's orchestrator)
 
 ## Context

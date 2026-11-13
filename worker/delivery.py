@@ -31,7 +31,7 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from worker import gitea  # noqa: E402
-from worker.runtimes.base import RuntimeError_, sh  # noqa: E402
+from worker.shell import RuntimeError_, sh  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 _V = gitea._V
@@ -50,6 +50,7 @@ GITOPS_REPO = cfg("GITOPS_REPO", "demo-todo-gitops")
 GITEA_IN_KIND = cfg("GITEA_IN_KIND", "http://poc-gitea:3000")  # poc-gitea on the kind network
 PR_PORT_BASE = int(cfg("PR_PORT_BASE", "31100"))
 STAGE_PORTS = {"dev": 31081, "staging": 31082, "prod": 31083}
+STAGES = tuple(STAGE_PORTS)
 STAGE_CLUSTERS = {"dev": "nonprod", "staging": "nonprod", "prod": "prod"}
 KAGENT = cfg("KAGENT_BIN", str(ROOT / ".cache/bin/kagent"))
 KAGENT_API = cfg("KAGENT_API_URL", f"http://localhost:{cfg('KAGENT_API_PORT', '8083')}")
@@ -248,6 +249,18 @@ async def promote(stage: str, version: str) -> dict:
                            "spec": {"stage": stage, "freight": f["metadata"]["name"]}})
     out = await kubectl(HUB, "create", "-f", "-", "-o", "name", stdin=manifest)
     return {"promotion": out.strip().split("/")[-1], "freight": f["metadata"]["name"], "alias": f.get("alias", "")}
+
+
+async def release_status(version: str) -> dict:
+    """Where a release is right now, straight from Kargo: {stage: {state, message, url}}."""
+    out = {}
+    for stage in STAGES:
+        try:
+            st = await stage_status(stage, version)
+        except RuntimeError_ as e:
+            st = {"state": "unknown", "message": str(e)[:200]}
+        out[stage] = {**st, "url": stage_url(stage)}
+    return out
 
 
 def stage_url(stage: str) -> str:

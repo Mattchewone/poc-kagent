@@ -1,4 +1,6 @@
-"""WorkItemWorkflow: one request, from intake to production. Temporal owns the whole lifecycle.
+"""WorkItemWorkflow: one request, from intake to a released image. Temporal owns the parts that are
+non-deterministic or need stitching together (the agent loop, verification, PR + preview, review,
+merge, release build). Rolling the release through dev -> staging -> prod is Kargo's job, not this one.
 
     intake (chat / Gitea issue / Jira later)
       -> run_agent         Temporal invokes dev-agent over A2A (kagent session per work item)
@@ -8,11 +10,11 @@
       -> deploy_pr_env     Argo CD Application on kargo-nonprod, namespace demo-todo-pr-<n>
       -> in review         waits for: feedback (chat / `/agent` PR comment) -> back to run_agent,
                            merge (chat tool, gated) or a merge/close in Gitea (webhook, poll fallback)
-      -> release_image     semver image of the merge commit; Kargo Warehouse refreshed
-      -> wait_for_stage    dev (auto-promoted) -> staging -> prod (each promoted in Kargo or via chat)
+      -> release_image     semver image of the merge commit; Kargo Warehouse refreshed -> done
+                           (Kargo + Argo CD take it from here: dev auto, staging/prod on promotion)
 
 Handlers: Update `submit` (agent), Signal `feedback`, Update `merge`, Signal `pr_event` (webhook),
-Update `promote`, Signal `abandon`, Query `status`. Activities live in worker/work_activities.py
+Signal `abandon`, Query `status`. Activities live in worker/work_activities.py
 and are called by name, so this module stays importable inside the workflow sandbox.
 """
 from __future__ import annotations
@@ -25,10 +27,8 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError, ApplicationError
 
-from worker.change import AppEnv, Revision, StartAppInput, VerifyInput, VerifyResult
 
 WORK_QUEUE = "mock-poc"
-STAGES = ("dev", "staging", "prod")
 MAX_REVISIONS = 12
 MAX_FAILED_TURNS = 3  # agent turns in a row without a passing revision -> ask a human
 PR_POLL = timedelta(minutes=5)  # fallback in case a Gitea webhook is missed
@@ -43,16 +43,56 @@ PREVIEWING = "deploying preview"
 IN_REVIEW = "in review"
 MERGING = "merging"
 RELEASING = "building release"
-ROLLOUT = "rolling out"  # + state["stage"]
-AWAITING = "awaiting promotion"  # + state["stage"]
-DONE = "done"
+DONE = "released"
 CLOSED = "closed"
 
 # phases in which a human is expected to do something (wait_for_work returns on these)
-HUMAN_PHASES = (NEEDS_INPUT, IN_REVIEW, AWAITING, DONE, CLOSED)
+HUMAN_PHASES = (NEEDS_INPUT, IN_REVIEW, DONE, CLOSED)
 
 
-# ---- payloads -------------------------------------------------------------
+# ---- payloads (pure dataclasses: this module must stay importable in the workflow sandbox) ----
+
+@dataclass
+class AppEnv:
+    """A verify sandbox: the supervisor (images/app/supervisor.mjs), reachable from the host at `url`."""
+    runtime: str
+    name: str
+    url: str
+    meta: dict = field(default_factory=dict)
+
+
+@dataclass
+class Revision:
+    diff: str
+    summary: str = ""
+    rev_id: str = ""
+
+
+@dataclass
+class StartAppInput:
+    runtime: str
+    change_id: str  # the work id
+    n: int
+
+
+@dataclass
+class VerifyInput:
+    env: AppEnv
+    diff: str
+
+
+@dataclass
+class VerifyResult:
+    passed: bool
+    base_sha: str
+    output: str = ""
+    agent_tests: dict = field(default_factory=dict)
+    base_tests: dict = field(default_factory=dict)
+    tests_touched: bool = False
+    weakened: list = field(default_factory=list)
+    touched: list = field(default_factory=list)
+    error: str = ""
+
 
 @dataclass
 class WorkRequest:
@@ -146,12 +186,6 @@ class ReleaseInput:
 
 
 @dataclass
-class StageInput:
-    stage: str
-    version: str
-
-
-@dataclass
 class CommentInput:
     pr_number: int
     body: str
@@ -182,14 +216,6 @@ _OPTS = {
     "close_pr": dict(start_to_close_timeout=timedelta(seconds=30), retry_policy=_RETRY),
     "release_image": dict(start_to_close_timeout=timedelta(minutes=10), heartbeat_timeout=timedelta(minutes=2),
                           retry_policy=RetryPolicy(initial_interval=timedelta(seconds=5), maximum_attempts=3)),
-    "promote_stage": dict(start_to_close_timeout=timedelta(minutes=1), retry_policy=_RETRY),
-}
-# Waiting on a Kargo stage: one long activity polling with heartbeats (keeps workflow history
-# small). dev is auto-promoted, so it should finish in minutes; staging/prod wait for a human.
-_STAGE_OPTS = {
-    "dev": timedelta(minutes=30),
-    "staging": timedelta(days=14),
-    "prod": timedelta(days=14),
 }
 
 
@@ -238,8 +264,7 @@ def retry_prompt(req: WorkRequest, last: dict) -> str:
 class WorkItemWorkflow:
     def __init__(self) -> None:
         self.req: WorkRequest | None = None
-        self.state: dict = {"phase": QUEUED, "revisions": [], "turns": [], "feedback": [], "stages": {},
-                            "log": []}
+        self.state: dict = {"phase": QUEUED, "revisions": [], "turns": [], "feedback": [], "log": []}
         self.inbox: list[Feedback] = []  # feedback not yet given to the agent
         self.verify_lock = asyncio.Lock()
         self.merge_requested: str | None = None  # who asked
@@ -252,13 +277,9 @@ class WorkItemWorkflow:
         self.state["log"].append({"at": workflow.now().isoformat(timespec="seconds"), "msg": msg})
         self.state["log"] = self.state["log"][-60:]
 
-    def _phase(self, phase: str, stage: str | None = None) -> None:
+    def _phase(self, phase: str) -> None:
         self.state["phase"] = phase
-        if stage is None:
-            self.state.pop("stage", None)
-        else:
-            self.state["stage"] = stage
-        self._log(phase + (f": {stage}" if stage else ""))
+        self._log(phase)
 
     # -- handlers --
     @workflow.update
@@ -324,22 +345,6 @@ class WorkItemWorkflow:
         if self.pr_closed is None:
             self.pr_closed = ev
             self._log(f"pr {ev.action}" + (f" by {ev.by}" if ev.by else ""))
-
-    @workflow.update
-    async def promote(self, stage: str) -> dict:
-        """Promote this work item's release into `stage` (a Kargo Promotion)."""
-        out = await act("promote_stage", StageInput(stage, self.state["release"]["version"]), dict)
-        self.state["stages"].setdefault(stage, {})["promotion"] = out.get("promotion")
-        self._log(f"promotion to {stage} requested")
-        return out
-
-    @promote.validator
-    def _v_promote(self, stage: str) -> None:
-        if stage not in STAGES:
-            raise ValueError(f"unknown stage {stage!r}; stages are {', '.join(STAGES)}")
-        if self.state["phase"] not in (AWAITING, ROLLOUT) or self.state.get("stage") != stage:
-            raise ValueError(f"{stage} is not waiting for a promotion (work item is '{self.state['phase']}'"
-                             + (f", stage {self.state['stage']}" if self.state.get("stage") else "") + ")")
 
     @workflow.signal
     def abandon(self, reason: str = "") -> None:
@@ -438,21 +443,11 @@ class WorkItemWorkflow:
             rel = await act("release_image", ReleaseInput(req.work_id, merge_sha, req.kind), dict)
             self.state["release"] = rel
             await act("comment_pr", CommentInput(pr["number"], (
-                f"Released as `{rel['image']}`. Kargo picks it up and rolls it out to dev automatically; "
+                f"Released as `{rel['image']}`. Kargo rolls it out to dev automatically; "
                 "staging and prod need a promotion (Kargo UI, or ask the chat agent).")))
-            for stage in STAGES:
-                self._phase(ROLLOUT if stage == "dev" else AWAITING, stage)
-                res = await act("wait_for_stage", StageInput(stage, rel["version"]), dict,
-                                schedule_to_close_timeout=_STAGE_OPTS[stage], start_to_close_timeout=_STAGE_OPTS[stage],
-                                heartbeat_timeout=timedelta(minutes=2),
-                                retry_policy=RetryPolicy(initial_interval=timedelta(seconds=10)))
-                self.state["stages"].setdefault(stage, {}).update(res)
-                if not res.get("verified"):
-                    self.state["result"] = f"{rel['version']} failed verification in {stage}: {res.get('message', '')}"
-                    self._phase(DONE)
-                    return self.state["result"]
-                self._log(f"{rel['version']} verified in {stage}")
-            self.state["result"] = f"{rel['version']} live in prod"
+            # Done here: dev -> staging -> prod is Kargo's (and Argo CD's) job, and Kargo already
+            # records, verifies and gates each promotion. Temporal waiting on it would only mirror it.
+            self.state["result"] = f"{rel['version']} released; Kargo rolls it out"
             self._phase(DONE)
             return self.state["result"]
         finally:
@@ -573,15 +568,12 @@ def summarize(state: dict, verbose: bool = False) -> dict:
         "work_id": state.get("work_id"),
         "title": state.get("title"),
         "phase": state.get("phase"),
-        "stage": state.get("stage"),
         "revision": last.get("n"),
         "passed": last.get("passed"),
         "pr": state.get("pr", {}).get("url"),
         "preview_url": (state.get("preview") or {}).get("url") if not (state.get("preview") or {}).get("torn_down") else None,
         "preview_error": (state.get("preview") or {}).get("error"),
         "release": (state.get("release") or {}).get("version"),
-        "stages": {s: ("verified" if v.get("verified") else v.get("message") or "pending")
-                   for s, v in state.get("stages", {}).items()} or None,
         "result": state.get("result"),
     }
     if state.get("phase") in (NEEDS_INPUT, IN_REVIEW) and turns:

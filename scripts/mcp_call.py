@@ -6,7 +6,7 @@
     .venv/bin/python scripts/mcp_call.py wait_for_work work_id=...
     .venv/bin/python scripts/mcp_call.py request_changes work_id=... feedback="..."
     .venv/bin/python scripts/mcp_call.py merge_pull_request work_id=...                     # /mcp-gated
-    .venv/bin/python scripts/mcp_call.py promote work_id=... stage=staging
+    .venv/bin/python scripts/mcp_call.py promote version=0.2.0 stage=staging
     .venv/bin/python scripts/mcp_call.py submit_revision work_id=... summary=... diff=@x.diff  # /mcp
 
 `key=@file` reads the value from a file.

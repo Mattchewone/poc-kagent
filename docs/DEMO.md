@@ -1,27 +1,19 @@
 # Demo: from a chat request to prod
 
 How to drive a change to demo-todo from request to production, and what to watch while it happens.
-One Temporal workflow (`WorkItemWorkflow`) owns each request the whole way:
+One Temporal workflow (`WorkItemWorkflow`) owns each request until its release image is built. Kargo
+takes it from there:
 
 1. **Input.** Chat with **delivery-agent**, or open a Gitea issue with `/agent` in it.
 2. **The agent works.** Temporal invokes **dev-agent** (Claude Code on a Substrate actor) over A2A.
    Each revision is verified in a fresh OpenShell sandbox, and a passing revision becomes a PR.
 3. **You review the PR environment.** A preview namespace on kargo-nonprod runs the PR's image.
    Feedback in chat or a `/agent` PR comment goes back to the agent, and the PR and the preview update.
-4. **You merge.** Temporal builds a release image, Kargo + Argo CD roll it out to dev automatically,
-   and you promote it to staging and then prod.
+4. **You merge.** Temporal builds a release image and the work item is done. Kargo + Argo CD roll it
+   out to dev automatically, and you promote it to staging and then prod.
 
-```
- you ─chat─▶ delivery-agent ─start_work─▶ Temporal WorkItemWorkflow ─A2A─▶ dev-agent (Substrate)
-   or ─/agent issue─▶ Gitea webhook ──┘          │                         │ code + tests
-                                                 │ ◀── submit_revision ────┘
-                                                 ├─▶ OpenShell sandbox: verify (no network)
-                                                 ├─▶ Gitea: PR  ─▶ kargo-nonprod: preview demo-todo-pr-N
-   you: review preview, /agent feedback ────────▶│
-   you: merge (chat Approve, or Gitea) ─────────▶├─▶ release image ─▶ Kargo: dev ─▶ staging ─▶ prod
-```
-
-Architecture and reasoning: [architecture.md](architecture.md),
+Small diagrams of each part (intake, agent turn, verify, preview, release, credentials) are in
+[architecture.md](architecture.md). Architecture and reasoning: [architecture.md](architecture.md),
 [ADR 0016](adr/0016-temporal-owns-the-work-item.md), [ADR 0017](adr/0017-kargo-delivery-and-pr-environments.md).
 
 ## 1. Before you start
@@ -29,7 +21,7 @@ Architecture and reasoning: [architecture.md](architecture.md),
 ```bash
 ../kargo/scripts/up.sh   # the kargo stack (6 kind clusters), if not already up
 make start            # poc cluster back from `make stop` (~2 min); first time: make up
-make dev              # temporal + worker + pipeline server (+ claude auth proxy, app on :3000)
+make dev              # temporal + worker + pipeline server + claude auth proxy
 make delivery         # once: gitops repo, Kargo project demo-todo, first release 0.1.0, stage edges
 make kagent-key       # once per key change; prints which auth mode it chose
 make demo-ui          # opens every UI below
@@ -41,7 +33,7 @@ After changing [clusters/poc/kagent/](../clusters/poc/kagent/), run `make kagent
 | What | URL | Login |
 |---|---|---|
 | kagent UI (chat: **delivery-agent**) | http://localhost:8082 | none |
-| Work items (one page per request) | http://localhost:8765 | none |
+| Work items: a readable view of each Temporal workflow | http://localhost:8765 | none |
 | Temporal | http://localhost:8233 | none |
 | Gitea | http://localhost:3300/poc/demo-todo | `poc` / `poc-password-local` |
 | Kargo | https://localhost:31444/project/demo-todo | password `admin` |
@@ -49,8 +41,6 @@ After changing [clusters/poc/kagent/](../clusters/poc/kagent/), run `make kagent
 | dev / staging / prod | http://localhost:31081 / 31082 / 31083 | none |
 | PR preview | http://localhost:311NN (NN = PR number) | none |
 
-`http://localhost:3000` (`scripts/app.sh`) still runs Gitea `main` straight from git. It's a quick
-look at `main`, not part of the delivery path. Real deploys go through Kargo.
 
 ## 2. Set up your screen
 
@@ -58,7 +48,7 @@ look at `main`, not part of the delivery path. Real deploys go through Kargo.
 |---|---|
 | **kagent UI** → delivery-agent | the chat, tool calls, the Approve prompt on merge and promote |
 | **Terminal: `make watch`** | actors waking/suspending, verify sandboxes, Temporal work items, Gitea PRs, timeline |
-| **Work item page** http://localhost:8765/work/&lt;id&gt; | step bar, each agent turn (prompt + reply), revisions with tests and diffs, PR, preview, release, stages |
+| **Work item page** http://localhost:8765/work/&lt;id&gt; | step bar, each agent turn (prompt + reply), revisions with tests and diffs, PR, preview, release (stage status live from Kargo) |
 | **Temporal UI** | the `WorkItemWorkflow` history: every activity, update and signal |
 | **Kargo UI** | Freight moving through dev → staging → prod |
 
@@ -122,17 +112,17 @@ the PR. The PR also has a comment with the preview link.
   1. merges the PR in Gitea;
   2. deletes the preview (Argo CD app, namespace, edge);
   3. runs `release_image`. A feature bumps the minor version (0.1.0 → 0.2.0) and a bug bumps the patch.
-     The image is pushed to kargo-registry and the Warehouse refreshed;
-  4. `wait_for_stage(dev)`: Kargo creates Freight, auto-promotes it to dev, Argo Rollouts runs a short
-     canary, and the smoke test checks `/version.txt` and `/api/stats`. Phase **rolling out: dev**,
-     then **awaiting promotion: staging**.
+     The image is pushed to kargo-registry and the Warehouse refreshed. Phase **released**: the
+     workflow is finished.
+- Kargo takes over: it creates Freight, auto-promotes it to dev, Argo Rollouts runs a short canary,
+  and the smoke test checks `/version.txt` and `/api/stats`. The work item page's release card and
+  `release_status` show it live.
 - Merging in Gitea's UI instead works the same: the webhook signals the workflow.
 - Check http://localhost:31081: the button is there.
 
-**5. Promote.** In chat, *"Promote it to staging"* (Approve), then *"and to prod"* (Approve). Or drag
-the Freight in the Kargo UI. Either way the workflow sees the stage verified and moves on. Staging
-only takes Freight verified in dev, and prod only Freight verified in staging. When prod is verified
-the work item is **done**: `0.2.0 live in prod`.
+**5. Promote.** In chat, *"Promote 0.2.0 to staging"* (Approve), then *"and to prod"* (Approve). The
+tool creates a Kargo Promotion directly; Temporal isn't involved. Or drag the Freight in the Kargo UI.
+Staging only takes Freight verified in dev, and prod only Freight verified in staging.
 
 ## 4. Input from a Gitea issue
 
@@ -156,7 +146,7 @@ Jira would plug in the same way: a webhook handler calling the same intake funct
 | *"Abandon it"* | `abandon_work`: PR closed, preview deleted, workflow completes `abandoned` |
 | Close the PR in Gitea | webhook → workflow completes `pr closed without merging`, preview deleted |
 | Restart the worker mid-turn (`kill $(cat .cache/worker.pid); make dev`) | Temporal retries `run_agent`; the agent is told it was interrupted and carries on in the same session |
-| Ask to merge while feedback is pending, or promote prod before staging | the workflow's validators refuse; the chat relays the reason |
+| Ask to merge while feedback is pending, or promote prod before staging | the workflow's validator / Kargo refuses; the chat relays the reason |
 | *"Delete the failing test and submit"* | the verifier still runs the original tests and flags weakened test files |
 
 ## 6. Where to look when something is off
@@ -168,7 +158,7 @@ Jira would plug in the same way: a webhook handler calling the same intake funct
 | Verification failing | the work item page (full test output per revision) |
 | **preview failed** on the work item | Argo CD app `demo-todo-pr-N`; `kubectl --context kind-kargo-nonprod -n demo-todo-pr-N get pods`; `docker ps \| grep demo-todo-edge` |
 | PR comment / Gitea merge not picked up | Gitea → repo Settings → Webhooks → recent deliveries; `.cache/pipeline.log`. The 5-minute poll catches merges anyway |
-| Stuck in **rolling out: dev** | Kargo UI → demo-todo → dev (promotion and verification); `kubectl --context kind-kargo-hub -n demo-todo get freight,promotions` |
+| Release not reaching dev | Kargo UI → demo-todo → dev (promotion and verification); `kubectl --context kind-kargo-hub -n demo-todo get freight,promotions` |
 | Stage URL doesn't load | `make delivery` (recreates edges); `kubectl --context kind-kargo-nonprod -n demo-todo-dev get pods` |
 
 ## 7. Resetting between demos
