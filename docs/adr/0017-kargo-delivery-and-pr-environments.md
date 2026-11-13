@@ -3,7 +3,7 @@
 - **Status:** Accepted (2026-11-12), amended by [0019](0019-kargo-stack-in-repo.md) (the kargo stack is now built from this repo). Amends [0010](0010-gitea-local-pr.md) (poc-gitea is now the one
   Gitea for the agent flow, including gitops) and [0015](0015-observability.md) (the main-branch app
   is no longer how changes reach users)
-- **Origin:** Owner (tie into ../kargo as a new project and namespaces, PR previews on
+- **Origin:** Owner (deliver through Kargo + Argo CD as a new project and namespaces, PR previews on
   kargo-nonprod, the full dev → staging → prod flow, Temporal does the build, one Gitea). Mechanisms
   are implementation choices.
 
@@ -11,13 +11,14 @@
 
 Before this, "deploy" meant [scripts/app.sh](../../scripts/app.sh) noticing a new commit on `main` and
 restarting `node` on :3000. PR previews were the OpenShell verify sandboxes, deleted the moment the PR
-opened, so nobody could review a PR against a running environment. The machine also runs a separate
-Kargo demo: six kind clusters with Argo CD, Kargo and Argo Rollouts, and its own Gitea and registry.
+opened, so nobody could review a PR against a running environment, and there were no stages or
+promotions between `main` and users.
 
 ## Decision
 
-A new Kargo **project `demo-todo`** on the existing kargo clusters. Nothing in the `kargo-demo`
-project changes. Everything is applied by [scripts/delivery-up.sh](../../scripts/delivery-up.sh)
+A Kargo **project `demo-todo`** on the kargo clusters (`kargo-hub`, `kargo-nonprod`, `kargo-prod`,
+built by [scripts/kargo-up.sh](../../scripts/kargo-up.sh), see [0019](0019-kargo-stack-in-repo.md)).
+Everything is applied by [scripts/delivery-up.sh](../../scripts/delivery-up.sh)
 (`make delivery`).
 
 | Piece | Where | Defined in |
@@ -46,7 +47,7 @@ project changes. Everything is applied by [scripts/delivery-up.sh](../../scripts
   completes once `/version.txt` on the preview returns the new tag, so "preview ready" means the new
   code is actually being served. Merge, close and abandon all delete the Application (with the cascade
   finalizer), the namespace and the edge container.
-- **Releases follow the existing Kargo pattern.** A semver tag in the registry becomes Freight. Each
+- **Releases follow the standard Kargo pattern.** A semver tag in the registry becomes Freight. Each
   promotion renders `stages/<stage>` into the `stage/<stage>` branch and syncs the Argo CD app. The
   `smoke-test` AnalysisTemplate passes once the stage serves the promoted version (`/version.txt`)
   and `/api/stats` answers. staging only takes Freight verified in dev, and prod only Freight verified
@@ -55,13 +56,13 @@ project changes. Everything is applied by [scripts/delivery-up.sh](../../scripts
   `delivery-up.sh` builds 0.1.0 from `main` when the registry has no release yet.
 - **One Gitea: poc-gitea.** It holds the app repo, the gitops repo, PRs and webhooks. It joins the
   `kind` Docker network, so Kargo and Argo CD reach it as `http://poc-gitea:3000`. The poc cluster's
-  agents and the host keep using `localhost:3300` / `host.docker.internal:3300`. The kargo hub's own
-  Gitea stays as it is, serving only the `kargo-demo` project.
-- **Host access through edge containers.** The kargo clusters' kind configs only map the `kargo-demo`
-  ports, and adding mappings would mean recreating them. Instead, a small `alpine/socat` container per
+  agents and the host keep using `localhost:3300` / `host.docker.internal:3300`. The kargo clusters
+  run no Gitea of their own.
+- **Host access through edge containers.** Preview ports are allocated per PR, and kind port mappings
+  can only be set when a cluster is created. Instead, a small `alpine/socat` container per
   port (`demo-todo-edge-<port>`, on the kind network) forwards `127.0.0.1:<port>` to the node's
   NodePort. Kargo's verification doesn't use them: it calls `kargo-<cluster>-control-plane:<port>`
-  directly, the same way `kargo-demo` does.
+  directly.
 
 ## Consequences
 

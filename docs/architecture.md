@@ -143,7 +143,7 @@ gives the actor a placeholder key, and the gateway swaps in the real one on the 
 | Host processes (`make dev`) | Temporal :7233 / UI :8233, worker, pipeline server :8765, claude auth proxy :8766 |
 | Docker containers | poc-gitea :3300, kind-registry :5001, edge containers (:31081-3, :311NN) |
 | kind `poc` | kagent (UI :8082, API :8083), Substrate actors for both agents, OpenShell verify sandboxes |
-| kargo stack (6 kind clusters) | kargo-hub: Kargo, Argo CD, kargo-registry · kargo-nonprod: dev, staging, PR previews · kargo-prod: prod |
+| kargo stack (3 kind clusters + registry) | kargo-hub: Kargo, Argo CD, kargo-registry · kargo-nonprod: dev, staging, PR previews · kargo-prod: prod |
 
 What each boundary guarantees:
 

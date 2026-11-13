@@ -6,28 +6,25 @@
 
 ## Context
 
-[0017](0017-kargo-delivery-and-pr-environments.md) put delivery on "the kargo stack": a separate
-Kargo demo at `../kargo` that wasn't under version control. It ran six kind clusters,
-its own Gitea, an A/B gate on Traefik and its own demo app. `scripts/delivery-up.sh` refused to run
-until that stack was up. Anyone else who cloned mock-poc had no way to get previews or releases.
+[0017](0017-kargo-delivery-and-pr-environments.md) put delivery on "the kargo stack", which was set
+up outside this repo. `scripts/delivery-up.sh` refused to run until that stack was up, so anyone
+else who cloned mock-poc had no way to get previews or releases.
 
-mock-poc uses only part of that stack: `kargo-hub` (Argo CD, Kargo, Argo Rollouts for
+mock-poc needs: `kargo-hub` (Argo CD, Kargo, Argo Rollouts for
 AnalysisRuns), `kargo-nonprod`, `kargo-prod` and `kargo-registry`. Git is already in this repo
 (poc-gitea, [0010](0010-gitea-local-pr.md)).
 
 ## Decision
 
-- **[scripts/kargo-up.sh](../../scripts/kargo-up.sh)** (`make kargo`) builds exactly that part. The
+- **[scripts/kargo-up.sh](../../scripts/kargo-up.sh)** (`make kargo`) builds exactly that. The
   kind configs are in [clusters/kargo-stack/](../../clusters/kargo-stack/), and the chart versions
   and node image are pinned in [scripts/versions.env](../../scripts/versions.env). It uses the pinned
   `.cache/bin/kind`, passes `helm --repo` so the user's helm repo list stays unchanged, and restores
   the kube context after `kind create`.
 - **Same names as before**: `kargo-hub`, `kargo-nonprod`, `kargo-prod`, `kargo-registry`, and Argo CD
-  cluster names `nonprod` / `prod`. A machine already running the standalone stack reuses it: existing
-  nodes are started, installed charts are skipped, and nothing in the `kargo-demo` project is touched.
-  Nothing else in the repo had to change.
-- **Left out:** the hub's Gitea, the three regional clusters, Traefik / Gateway API and the
-  `kargo-demo` project. demo-todo uses none of them.
+  cluster names `nonprod` / `prod`, so nothing else in the repo had to change. Re-runs are
+  idempotent: existing nodes are started and installed charts are skipped.
+- **No second Gitea, no extra clusters, no ingress controller.** demo-todo needs none of them.
 - **`make up` = `doctor` → venv → poc cluster → kargo stack → delivery.**
   [scripts/doctor.sh](../../scripts/doctor.sh) checks the host tools and Docker memory first.
   `make stop` stops all four clusters. `make down` still deletes only the poc cluster, and
@@ -41,13 +38,11 @@ AnalysisRuns), `kargo-nonprod`, `kargo-prod` and `kargo-registry`. Git is alread
 - Four kind clusters need about 12 GiB of Docker memory. `make doctor` warns when there is less.
 - The kargo clusters run Kubernetes 1.33 and poc runs 1.37 (kagent needs it). They are pinned
   separately.
-- `make kargo-down` also deletes the clusters the standalone kargo demo uses, if both run on one
-  machine.
 
 ## Alternatives considered
 
-- **Git submodule of the kargo demo.** It isn't a repo, and it would bring the six-cluster setup,
-  the second Gitea and the A/B gate with it.
+- **Keep the stack outside the repo.** Every clone would need a separate setup step to get previews
+  and releases.
 - **Put Argo CD and Kargo on the poc cluster.** One cluster fewer, but previews and stages would
   share a node with kagent and the agents. It would also drop the hub → workload topology that 0017
   shows, and change every context in `worker/delivery.py`.

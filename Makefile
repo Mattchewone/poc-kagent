@@ -73,7 +73,7 @@ forwards: ## (re)start the kagent UI/API and OpenShell gateway port-forwards
 
 down: stop ## delete the poc cluster; kind-registry, the image cache, Gitea and the kargo stack are kept
 	-.cache/bin/kind delete cluster --name poc
-kargo-down: ## delete kargo-hub/nonprod/prod (also used by the standalone kargo demo, if you run it); registry kept
+kargo-down: ## delete kargo-hub/nonprod/prod; registry kept
 	-for c in hub nonprod prod; do .cache/bin/kind delete cluster --name kargo-$$c; done
 
 # ---- foreground processes (for debugging; `make dev` runs them in the background) ----

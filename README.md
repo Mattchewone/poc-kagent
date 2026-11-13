@@ -59,8 +59,7 @@ make demo-ui                       # kagent, work items, Temporal, Gitea, Kargo,
 
 Fresh machine: about 15 min on the first run, mostly image pulls. Give Docker 12+ GiB of memory
 (four kind clusters). `make stop` / `make up` pause and resume everything. `make poc-up`, `make kargo`
-and `make delivery` run one part at a time. If you already run the standalone kargo demo stack, its
-`kargo-hub` / `kargo-nonprod` / `kargo-prod` clusters and `kargo-registry` are reused as they are.
+and `make delivery` run one part at a time.
 
 For a guided walkthrough with what to watch at each step, see [docs/DEMO.md](docs/DEMO.md) and run
 `make watch` alongside the chat. Diagrams are in [docs/architecture.md](docs/architecture.md). Who acts as whom: [docs/identity.md](docs/identity.md).

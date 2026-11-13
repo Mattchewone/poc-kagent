@@ -6,7 +6,6 @@
 #   kargo-prod      Argo Rollouts; demo-todo prod
 #   kargo-registry  TLS registry (self-signed), host localhost:5002, clusters kargo-registry:5000
 #
-# Same names as the standalone kargo demo stack, so a machine that already runs it reuses it.
 # Idempotent and fast on re-run: stopped nodes are started, installed charts are skipped.
 # Git is not here: Kargo and Argo CD read poc-gitea (scripts/gitea-up.sh, scripts/delivery-up.sh).
 set -euo pipefail
