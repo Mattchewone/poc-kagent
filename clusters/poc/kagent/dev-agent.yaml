@@ -1,0 +1,99 @@
+# The dev agent: Claude Code (kagent's Claude harness + node) on a Substrate actor.
+# Rendered by scripts/kagent-apply.sh, which substitutes ${HARNESS_IMAGE} (sha256-pinned).
+#
+#   Harness          claude runtime on the kagent-default WorkerPool, our image with node
+#   ModelConfig      Anthropic, key from the kagent-anthropic Secret `kagent install` created;
+#                    Substrate's gateway injects it, the actor only ever sees a placeholder
+#   EgressPolicy     Gitea on the host (anonymous clone). MCP origins are added automatically.
+#   RemoteMCPServer  pipeline (submit/status/abandon) and pipeline-release (open_pull_request),
+#                    split because the Claude harness gates whole servers, not single tools
+#   Agent            binds both; pipeline-release with requireApproval
+apiVersion: api.kagent.dev/v1alpha3
+kind: Harness
+metadata:
+  name: claude-node
+  namespace: kagent
+spec:
+  claude: {}
+  workload:
+    image: ${HARNESS_IMAGE}
+  substrate:
+    workerPoolRef:
+      name: kagent-default
+    snapshotPolicy:
+      location: s3://ate-snapshots/kagent/
+---
+apiVersion: api.kagent.dev/v1alpha3
+kind: ModelConfig
+metadata:
+  name: dev-agent-model
+  namespace: kagent
+spec:
+  provider: Anthropic
+  model: ${DEV_AGENT_MODEL}
+  apiKeySecret: kagent-anthropic
+  apiKeySecretKey: ANTHROPIC_API_KEY
+  # The Claude harness accepts no Anthropic provider options except baseUrl (kagent 1.0.1).
+---
+apiVersion: api.kagent.dev/v1alpha3
+kind: EgressPolicy
+metadata:
+  name: gitea
+  namespace: kagent
+spec:
+  destinations:
+    - origin: http://host.docker.internal:${GITEA_PORT}
+---
+apiVersion: api.kagent.dev/v1alpha3
+kind: RemoteMCPServer
+metadata:
+  name: pipeline
+  namespace: kagent
+spec:
+  description: Verify a diff in a fresh sandbox and get a preview URL; change status; abandon.
+  url: http://host.docker.internal:${PIPELINE_PORT}/mcp
+  protocol: STREAMABLE_HTTP
+  timeout: 10m
+  sseReadTimeout: 10m
+---
+apiVersion: api.kagent.dev/v1alpha3
+kind: RemoteMCPServer
+metadata:
+  name: pipeline-release
+  namespace: kagent
+spec:
+  description: Open a pull request for a verified change (human approval required).
+  url: http://host.docker.internal:${PIPELINE_PORT}/mcp-gated
+  protocol: STREAMABLE_HTTP
+  timeout: 5m
+---
+apiVersion: api.kagent.dev/v1alpha3
+kind: Agent
+metadata:
+  name: dev-agent
+  namespace: kagent
+spec:
+  harnessRef:
+    name: claude-node
+  egressPolicyRefs:
+    - name: gitea
+  template:
+    inline:
+      description: >-
+        Builds features and fixes bugs in the demo-todo app. Ask for a change; it implements it with
+        tests, gets it verified in a sandbox, shows you a preview, and opens a PR when you approve.
+      modelConfig:
+        name: dev-agent-model
+      systemPromptFrom:
+        name: dev-agent-prompt
+        key: prompt.md
+      tools:
+        - mcp:
+            server:
+              kind: RemoteMCPServer
+              name: pipeline
+        - mcp:
+            server:
+              kind: RemoteMCPServer
+              name: pipeline-release
+            requireApproval: true

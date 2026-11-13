@@ -27,7 +27,7 @@ fi
 echo "Loading image into poc-openshell"
 kind load docker-image mock-poc-agent:dev --name poc-openshell
 
-scripts/port-forwards.sh openshell
+scripts/port-forwards.sh legacy-openshell
 openshell gateway add "http://127.0.0.1:${OPENSHELL_GATEWAY_PORT}" --local --name poc 2>/dev/null || true
 openshell gateway select poc 2>/dev/null || true
 openshell status

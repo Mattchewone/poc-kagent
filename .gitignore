@@ -4,3 +4,5 @@ out/*.patch
 out/results.tsv
 __pycache__/
 .pytest_cache/
+.env
+demo-app/node_modules/

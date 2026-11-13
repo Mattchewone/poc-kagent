@@ -18,11 +18,17 @@ stop_pf() {
   kill "$pid" 2>/dev/null || true       # the restart loop
   rm -f "$f"
 }
+C=kind-${CLUSTER:-poc}
 case "${1:-all}" in
-  openshell) pf openshell kind-poc-openshell openshell openshell "${OPENSHELL_GATEWAY_PORT}:8080" ;;
+  # single-cluster stack (scripts/up.sh)
+  openshell) pf openshell "$C" openshell openshell "${OPENSHELL_GATEWAY_PORT}:8080" ;;
+  kagent-ui) pf kagent-ui "$C" kagent kagent-ui "${KAGENT_UI_PORT}:8080" ;;
+  kagent-api) pf kagent-api "$C" kagent kagent-controller "${KAGENT_API_PORT}:8083" ;;
+  all) for f in openshell kagent-ui kagent-api; do "$0" $f || true; done ;;
+  # legacy two-cluster stack (milestones 2-8: make openshell-up / substrate-up)
+  legacy-openshell) pf openshell kind-poc-openshell openshell openshell "${OPENSHELL_GATEWAY_PORT}:8080" ;;
   substrate) pf substrate kind-poc-substrate ate-system atenet-router "${SUBSTRATE_ROUTER_PORT}:80" ;;
-  all) "$0" openshell || true; "$0" substrate || true ;;
   restart) "$0" stop; "$0" all ;;
   stop) for f in .cache/pf-*.pid; do stop_pf "$f"; done
-        pkill -f "port-forward svc/(openshell|atenet-router)" 2>/dev/null || true; echo "port-forwards stopped" ;;
+        pkill -f "port-forward svc/(openshell|atenet-router|kagent-ui|kagent-controller)" 2>/dev/null || true; echo "port-forwards stopped" ;;
 esac

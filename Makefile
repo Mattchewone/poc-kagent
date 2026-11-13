@@ -6,27 +6,57 @@ SCENARIO ?= happy
 IMAGE := mock-poc-agent:dev
 TEMPORAL_DB := .cache/temporal.db
 
-.PHONY: help setup test host-check images up down openshell-up openshell-check substrate-up substrate-check \
+.PHONY: help setup test host-check images up stop start down tools gitea kagent-apply kagent-key ui \
+        pipeline pipeline-bg pipeline-stop dev dev-stop legacy-up openshell-up openshell-check substrate-up substrate-check \
         substrate-poc forwards temporal worker worker-bg worker-stop run combined approve reject status watch adapters \
         leftovers experiment experiments clean
 
 help:
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
 
-setup: ## python venv with temporalio, httpx, pytest
+setup: ## python venv with temporalio, httpx, mcp, pytest
 	uv venv -q -p 3.12 .venv && uv pip install -q -p .venv -r requirements.txt
 
-test: ## milestone 4: fake agent unit tests (no cluster)
+test: ## unit tests (no cluster): fake agent, review gate, change workflow, demo app
 	$(PY) -m pytest -q tests
+	cd demo-app && npm test --silent
 
 host-check: ## milestone 1: tools + kernel >= 6.2 + landlock
 	scripts/host-check.sh
 
-images: ## build the agent image (one image, two entrypoints)
-	docker build -f images/Dockerfile -t $(IMAGE) .
+images: ## build all images (app supervisor, kagent harness + node, fake agent)
+	scripts/images.sh
 
-# ---- clusters -------------------------------------------------------------
-up: images openshell-up substrate-up substrate-poc ## both clusters, ready for runs
+# ---- the stack: one kind cluster with kagent (+ its Substrate) and OpenShell ---------
+up: ## bring everything up (fast if stopped or already running): cluster, kagent, OpenShell, Gitea, dev agent
+	scripts/up.sh
+start: up ## same as up: restarts a stopped cluster in about a minute
+stop: pipeline-stop worker-stop ## stop the cluster without deleting it (keeps installs, images, Gitea PRs)
+	-scripts/port-forwards.sh stop
+	-docker stop poc-control-plane
+tools: ## pinned kind + kagent CLIs in .cache/bin
+	scripts/tools.sh
+gitea: ## local Gitea with the demo-todo repo (http://localhost:3300)
+	scripts/gitea-up.sh
+kagent-apply: ## (re)apply the dev agent: harness, model, egress, MCP servers, Agent
+	scripts/kagent-apply.sh
+kagent-key: ## set the Anthropic API key in the cluster from ANTHROPIC_API_KEY (env or .env)
+	scripts/kagent-apply.sh key
+ui: ## open the kagent UI and the changes page
+	open http://localhost:8082 http://localhost:8765
+
+# ---- pipeline: temporal + worker + MCP server -------------------------------
+dev: ## temporal + worker + pipeline MCP server in the background (APP_RUNTIME=local needs no cluster)
+	@scripts/dev.sh start $(or $(APP_RUNTIME),openshell)
+dev-stop: ## stop what `make dev` started
+	@scripts/dev.sh stop
+pipeline: ## pipeline MCP server in the foreground (APP_RUNTIME=openshell|local)
+	APP_RUNTIME=$(or $(APP_RUNTIME),openshell) $(PY) worker/pipeline_server.py
+pipeline-stop:
+	@scripts/dev.sh stop-pipeline
+
+# ---- legacy: two clusters, fake agent (milestones 1-8) ----------------------
+legacy-up: images openshell-up substrate-up substrate-poc ## old two-cluster setup for the milestone experiments
 
 openshell-up: ## milestone 2: kind + Calico + Agent Sandbox + OpenShell chart + CLI
 	scripts/openshell-up.sh
@@ -43,11 +73,10 @@ substrate-poc: images ## push image by digest; atespace poc, WorkerPool, agent +
 forwards: ## (re)start the gateway + router port-forwards
 	scripts/port-forwards.sh all
 
-down: worker-stop ## delete both clusters and port-forwards
-	-scripts/port-forwards.sh stop
+down: stop ## delete the cluster(s); registries, pull-through caches and Gitea are kept
+	-.cache/bin/kind delete cluster --name poc
 	-kind delete cluster --name poc-openshell
 	-kind delete cluster --name poc-substrate
-	-docker rm -f kind-registry
 
 # ---- temporal + worker ----------------------------------------------------
 temporal: ## temporal dev server with Runtime/Scenario search attributes (UI :8233)

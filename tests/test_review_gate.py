@@ -17,7 +17,7 @@ from temporalio.worker import Worker
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from worker.activities import (  # noqa: E402
-    ImplementInput, ImplementResult, RunTestsInput, SavePatchInput, StartEnvInput, TestResult,
+    ImplementInput, ImplementResult, RunTestsInput, SavePatchInput, StartEnvInput, TestResult as TResult,
 )
 from worker.runtimes import Handle  # noqa: E402
 from worker.start import _review_when_ready  # noqa: E402
@@ -45,8 +45,8 @@ class Stubs:
             return ImplementResult(diff=f"diff {len(self.feedback)}", notes="", attempt=len(self.feedback))
 
         @activity.defn(name="run_tests")
-        async def run_tests(inp: RunTestsInput) -> TestResult:
-            return TestResult(passed=inp.n > 1, output="1 failed", tests_touched=False, env=f"t-{inp.n}")
+        async def run_tests(inp: RunTestsInput) -> TResult:
+            return TResult(passed=inp.n > 1, output="1 failed", tests_touched=False, env=f"t-{inp.n}")
 
         @activity.defn(name="pause_env")
         async def pause_env(h: Handle) -> None:

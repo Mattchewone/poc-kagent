@@ -1,0 +1,10 @@
+# Verify + preview sandbox: no providers, no network endpoints -> no egress.
+# Writable: /work (base tree, patched app, test copies) and /tmp. Everything else read-only.
+version: 1
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /etc, /opt/poc, /dev, /proc, /bin, /sbin]
+  read_write: [/tmp, /work, /dev/null]   # git apply opens /dev/null rw
+landlock:
+  compatibility: best_effort
+network_policies: {}

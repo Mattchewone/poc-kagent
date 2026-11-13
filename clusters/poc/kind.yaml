@@ -1,0 +1,15 @@
+# One cluster for everything: kagent (+ its Substrate v1.0.0), OpenShell, Calico.
+# No default CNI so Calico can enforce NetworkPolicy (OpenShell needs it).
+# containerd reads per-registry hosts.toml from certs.d; scripts/up.sh maps localhost:5001 to kind-registry.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: poc
+networking:
+  disableDefaultCNI: true
+  podSubnet: 10.244.0.0/16   # not Calico's default 192.168/16: Docker Desktop's host is 192.168.65.254
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.cri.v1.images".registry]
+      config_path = "/etc/containerd/certs.d"
+nodes:
+  - role: control-plane
