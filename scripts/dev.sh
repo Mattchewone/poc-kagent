@@ -23,12 +23,13 @@ case "${1:-start}" in
     stop_one pipeline >/dev/null
     APP_RUNTIME=$rt nohup $PY worker/pipeline_server.py >> .cache/pipeline.log 2>&1 & echo $! > .cache/pipeline.pid
     for _ in $(seq 1 20); do curl -sf localhost:8765/healthz >/dev/null && break; sleep 0.5; done
-    echo "pipeline up on :8765 (verify/preview on $rt)   changes: http://localhost:8765"
+    echo "pipeline up on :8765 (verify/preview on $rt)   work items: http://localhost:8765"
     # Re-encodes a subscription token for kagent (worker/claude_auth_proxy.py); idle with an API key.
     alive claude-proxy || { nohup $PY worker/claude_auth_proxy.py >> .cache/claude-proxy.log 2>&1 & echo $! > .cache/claude-proxy.pid
       echo "claude auth proxy up on :${CLAUDE_PROXY_PORT:-8766}"; }
+    scripts/app.sh start || echo "warning: app (main) not started" >&2
     ;;
-  stop) stop_one claude-proxy; stop_one pipeline; stop_one worker; stop_one temporal ;;
+  stop) scripts/app.sh stop; stop_one claude-proxy; stop_one pipeline; stop_one worker; stop_one temporal ;;
   stop-pipeline) stop_one pipeline ;;
-  status) for p in temporal worker pipeline claude-proxy; do alive $p && echo "$p: running" || echo "$p: stopped"; done ;;
+  status) for p in temporal worker pipeline claude-proxy; do alive $p && echo "$p: running" || echo "$p: stopped"; done; scripts/app.sh status ;;
 esac

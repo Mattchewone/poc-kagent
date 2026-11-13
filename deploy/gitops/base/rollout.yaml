@@ -1,0 +1,32 @@
+# One replica: the todo store is in memory, so more pods would each show different todos.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: demo-todo
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels: { app: demo-todo }
+  template:
+    metadata:
+      labels: { app: demo-todo }
+    spec:
+      containers:
+        - name: web
+          image: kargo-registry:5000/demo-todo:placeholder
+          env:
+            - { name: PORT, value: "3000" }
+          ports:
+            - containerPort: 3000
+          readinessProbe:
+            httpGet: { path: /healthz, port: 3000 }
+            periodSeconds: 2
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+  # With one replica the canary runs the new pod next to the old one for the pause, then switches.
+  strategy:
+    canary:
+      steps:
+        - setWeight: 50
+        - pause: { duration: 15s }

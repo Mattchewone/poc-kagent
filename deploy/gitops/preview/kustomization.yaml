@@ -1,0 +1,13 @@
+# Per-PR preview. The Argo CD Application Temporal creates (worker/delivery.py) sets the namespace
+# (demo-todo-pr-<n>), the image (demo-todo-pr:pr<n>-<sha>), the NodePort and STAGE.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+patches:
+  # No canary pause for previews: each revision should be reviewable as soon as it is built.
+  - target: { kind: Rollout, name: demo-todo }
+    patch: |-
+      - op: replace
+        path: /spec/strategy/canary/steps
+        value: []

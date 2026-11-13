@@ -1,0 +1,33 @@
+# One Argo CD Application per demo-todo stage, each tracking the Kargo-rendered stage/<name> branch of
+# poc/demo-todo-gitops. No auto-sync: Kargo's promote task syncs them. Per-PR preview apps are not
+# here: Temporal creates and deletes those (worker/delivery.py).
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: demo-todo
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - list:
+        elements:
+          - { stage: dev,     cluster: nonprod }
+          - { stage: staging, cluster: nonprod }
+          - { stage: prod,    cluster: prod }
+  template:
+    metadata:
+      name: demo-todo-{{.stage}}
+      annotations:
+        kargo.akuity.io/authorized-stage: demo-todo:{{.stage}}
+    spec:
+      project: default
+      source:
+        repoURL: http://poc-gitea:3000/poc/demo-todo-gitops.git
+        targetRevision: stage/{{.stage}}
+        path: .
+      destination:
+        name: "{{.cluster}}"
+        namespace: demo-todo-{{.stage}}
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true

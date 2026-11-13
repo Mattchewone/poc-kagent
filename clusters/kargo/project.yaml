@@ -1,0 +1,183 @@
+# Kargo project for demo-todo on the kargo stack (../kargo, hub cluster kargo-hub).
+# Applied by scripts/delivery-up.sh. Same shape as the kargo-demo project, but:
+#   - git lives on poc-gitea (http://poc-gitea:3000, on the kind network), not the hub's Gitea
+#   - images come from the worker's release builds (Temporal), not scripts/release.sh
+#   - three stages: dev (kargo-nonprod, auto) -> staging (kargo-nonprod) -> prod (kargo-prod)
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: demo-todo
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ProjectConfig
+metadata:
+  name: demo-todo
+  namespace: demo-todo
+spec:
+  promotionPolicies:
+    - stageSelector:
+        name: dev
+      autoPromotionEnabled: true
+---
+# Semver tags only: per-PR preview images go to a separate repo (demo-todo-pr) and never become Freight.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: demo-todo
+  namespace: demo-todo
+spec:
+  interval: 1m
+  subscriptions:
+    - image:
+        repoURL: kargo-registry:5000/demo-todo
+        constraint: ">=0.1.0"
+        discoveryLimit: 20
+        insecureSkipTLSVerify: true
+---
+# Passes once the stage serves the promoted version (10 answers in a row), i.e. the rollout finished.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: smoke-test
+  namespace: demo-todo
+spec:
+  args:
+    - name: url
+    - name: version
+  metrics:
+    - name: serves-promoted-version
+      provider:
+        job:
+          spec:
+            backoffLimit: 0
+            activeDeadlineSeconds: 600
+            template:
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: check
+                    image: curlimages/curl:8.11.1
+                    command: ["sh", "-c"]
+                    args:
+                      - |
+                        want="{{args.version}}"; ok=0
+                        for i in $(seq 1 250); do
+                          got=$(curl -fsS --max-time 2 "{{args.url}}/version.txt" || echo unreachable)
+                          api=$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 2 "{{args.url}}/api/stats" || echo 000)
+                          if [ "$got" = "$want" ] && [ "$api" = 200 ]; then ok=$((ok+1)); else ok=0; fi
+                          echo "attempt $i: version=$got api=$api want=$want streak=$ok"
+                          [ $ok -ge 10 ] && exit 0
+                          sleep 2
+                        done
+                        exit 1
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: PromotionTask
+metadata:
+  name: promote
+  namespace: demo-todo
+spec:
+  vars:
+    - name: gitRepo
+      value: http://poc-gitea:3000/poc/demo-todo-gitops.git
+    - name: imageRepo
+      value: kargo-registry:5000/demo-todo
+  steps:
+    - uses: git-clone
+      config:
+        repoURL: ${{ vars.gitRepo }}
+        checkout:
+          - branch: main
+            path: ./src
+          - branch: stage/${{ ctx.stage }}
+            create: true
+            path: ./out
+    - uses: git-clear
+      config:
+        path: ./out
+    - uses: kustomize-set-image
+      as: update
+      config:
+        path: ./src/stages/${{ ctx.stage }}
+        images:
+          - image: ${{ vars.imageRepo }}
+            tag: ${{ imageFrom(vars.imageRepo).Tag }}
+    - uses: kustomize-build
+      config:
+        path: ./src/stages/${{ ctx.stage }}
+        outPath: ./out
+    - uses: git-commit
+      as: commit
+      config:
+        path: ./out
+        message: ${{ task.outputs.update.commitMessage }}
+    - uses: git-push
+      config:
+        path: ./out
+    - uses: argocd-update
+      config:
+        apps:
+          - name: demo-todo-${{ ctx.stage }}
+            sources:
+              - repoURL: ${{ vars.gitRepo }}
+                desiredRevision: ${{ task.outputs.commit.commit }}
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: dev
+  namespace: demo-todo
+spec:
+  requestedFreight:
+    - origin: { kind: Warehouse, name: demo-todo }
+      sources: { direct: true }
+  promotionTemplate:
+    spec:
+      steps:
+        - task: { name: promote }
+  verification:
+    analysisTemplates:
+      - name: smoke-test
+    args:
+      - { name: url, value: "http://kargo-nonprod-control-plane:31081" }
+      - { name: version, value: '${{ imageFrom("kargo-registry:5000/demo-todo").Tag }}' }
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: staging
+  namespace: demo-todo
+spec:
+  requestedFreight:
+    - origin: { kind: Warehouse, name: demo-todo }
+      sources: { stages: [dev] }
+  promotionTemplate:
+    spec:
+      steps:
+        - task: { name: promote }
+  verification:
+    analysisTemplates:
+      - name: smoke-test
+    args:
+      - { name: url, value: "http://kargo-nonprod-control-plane:31082" }
+      - { name: version, value: '${{ imageFrom("kargo-registry:5000/demo-todo").Tag }}' }
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: prod
+  namespace: demo-todo
+spec:
+  requestedFreight:
+    - origin: { kind: Warehouse, name: demo-todo }
+      sources: { stages: [staging] }
+  promotionTemplate:
+    spec:
+      steps:
+        - task: { name: promote }
+  verification:
+    analysisTemplates:
+      - name: smoke-test
+    args:
+      - { name: url, value: "http://kargo-prod-control-plane:31083" }
+      - { name: version, value: '${{ imageFrom("kargo-registry:5000/demo-todo").Tag }}' }

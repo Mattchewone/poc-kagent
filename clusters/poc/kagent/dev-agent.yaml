@@ -1,13 +1,18 @@
-# The dev agent: Claude Code (kagent's Claude harness + node) on a Substrate actor.
+# Two agents, both Claude Code (kagent's Claude harness + node) on Substrate actors.
 # Rendered by scripts/kagent-apply.sh, which substitutes ${HARNESS_IMAGE} (sha256-pinned).
 #
 #   Harness          claude runtime on the kagent-default WorkerPool, our image with node
 #   ModelConfig      Anthropic, key from the kagent-anthropic Secret `kagent install` created;
 #                    Substrate's gateway injects it, the actor only ever sees a placeholder
 #   EgressPolicy     Gitea on the host (anonymous clone). MCP origins are added automatically.
-#   RemoteMCPServer  pipeline (submit/status/abandon) and pipeline-release (open_pull_request),
+#   RemoteMCPServer  pipeline          /mcp        submit_revision, get_work       (dev-agent)
+#                    delivery          /mcp-chat   start/get/wait/list work, feedback, abandon
+#                    delivery-release  /mcp-gated  merge_pull_request, promote     (requireApproval)
 #                    split because the Claude harness gates whole servers, not single tools
-#   Agent            binds both; pipeline-release with requireApproval
+#   Agent dev-agent       the coder. Temporal invokes it over A2A, one session per work item
+#                         (worker/work.py); it never decides when a PR opens or merges.
+#   Agent delivery-agent  the chat front door: starts work items, relays review feedback, and
+#                         merges / promotes behind a human Approve click.
 apiVersion: api.kagent.dev/v1alpha3
 kind: Harness
 metadata:
@@ -50,7 +55,7 @@ metadata:
   name: pipeline
   namespace: kagent
 spec:
-  description: Verify a diff in a fresh sandbox and get a preview URL; change status; abandon.
+  description: Submit a revision for a work item; it is verified in a fresh sandbox and the result returned.
   url: http://host.docker.internal:${PIPELINE_PORT}/mcp
   protocol: STREAMABLE_HTTP
   timeout: 10m
@@ -59,10 +64,22 @@ spec:
 apiVersion: api.kagent.dev/v1alpha3
 kind: RemoteMCPServer
 metadata:
-  name: pipeline-release
+  name: delivery
   namespace: kagent
 spec:
-  description: Open a pull request for a verified change (human approval required).
+  description: Start and follow work items (Temporal), send review feedback, abandon.
+  url: http://host.docker.internal:${PIPELINE_PORT}/mcp-chat
+  protocol: STREAMABLE_HTTP
+  timeout: 10m
+  sseReadTimeout: 10m
+---
+apiVersion: api.kagent.dev/v1alpha3
+kind: RemoteMCPServer
+metadata:
+  name: delivery-release
+  namespace: kagent
+spec:
+  description: Merge a work item's PR or promote its release to staging/prod (human approval required).
   url: http://host.docker.internal:${PIPELINE_PORT}/mcp-gated
   protocol: STREAMABLE_HTTP
   timeout: 5m
@@ -80,8 +97,8 @@ spec:
   template:
     inline:
       description: >-
-        Builds features and fixes bugs in the demo-todo app. Ask for a change; it implements it with
-        tests, gets it verified in a sandbox, shows you a preview, and opens a PR when you approve.
+        The coder behind the delivery pipeline. Temporal invokes it for each work item: it implements
+        the change with tests and submits revisions for verification. Chat with delivery-agent instead.
       modelConfig:
         name: dev-agent-model
       systemPromptFrom:
@@ -92,8 +109,33 @@ spec:
             server:
               kind: RemoteMCPServer
               name: pipeline
+---
+apiVersion: api.kagent.dev/v1alpha3
+kind: Agent
+metadata:
+  name: delivery-agent
+  namespace: kagent
+spec:
+  harnessRef:
+    name: claude-node
+  template:
+    inline:
+      description: >-
+        Ask for a feature or a bug fix in demo-todo. It starts a work item that Temporal runs end to
+        end: the dev agent codes and verifies it, a PR opens with a preview environment, and once you
+        merge, Kargo rolls the release out dev -> staging -> prod.
+      modelConfig:
+        name: dev-agent-model
+      systemPromptFrom:
+        name: delivery-agent-prompt
+        key: prompt.md
+      tools:
         - mcp:
             server:
               kind: RemoteMCPServer
-              name: pipeline-release
+              name: delivery
+        - mcp:
+            server:
+              kind: RemoteMCPServer
+              name: delivery-release
             requireApproval: true

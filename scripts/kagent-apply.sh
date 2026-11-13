@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render and apply the dev agent (clusters/poc/kagent/) with the pushed harness image digest.
+# Render and apply dev-agent + delivery-agent (clusters/poc/kagent/) with the pushed harness image digest.
 #   scripts/kagent-apply.sh          apply / update
 #   scripts/kagent-apply.sh key      set the Anthropic credential from $ANTHROPIC_API_KEY (or .env)
 #
@@ -60,8 +60,11 @@ export HARNESS_IMAGE GITEA_PORT GITEA_USER GITEA_REPO
 export PIPELINE_PORT="${PIPELINE_PORT:-8765}" DEV_AGENT_MODEL="${DEV_AGENT_MODEL:-claude-sonnet-5-5}"
 render() { python3 -c 'import os,re,sys; print(re.sub(r"\$\{([A-Z_]+)\}", lambda m: os.environ[m.group(1)], open(sys.argv[1]).read()), end="")' "$1"; }
 
-render clusters/poc/kagent/dev-agent-prompt.md > .cache/dev-agent-prompt.md
-$K create configmap dev-agent-prompt --from-file=prompt.md=.cache/dev-agent-prompt.md --dry-run=client -o yaml | $K apply -f - >/dev/null
+for a in dev-agent delivery-agent; do
+  render clusters/poc/kagent/$a-prompt.md > .cache/$a-prompt.md
+  $K create configmap $a-prompt --from-file=prompt.md=.cache/$a-prompt.md --dry-run=client -o yaml | $K apply -f - >/dev/null
+done
 render clusters/poc/kagent/dev-agent.yaml | $K apply -f -
+$K delete remotemcpserver pipeline-release --ignore-not-found   # replaced by delivery-release
 set_endpoint
-echo "dev agent applied (harness image $HARNESS_IMAGE, model $DEV_AGENT_MODEL)"
+echo "agents applied: dev-agent (invoked by Temporal), delivery-agent (chat) (harness image $HARNESS_IMAGE, model $DEV_AGENT_MODEL)"

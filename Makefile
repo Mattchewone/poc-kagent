@@ -6,13 +6,13 @@ SCENARIO ?= happy
 IMAGE := mock-poc-agent:dev
 TEMPORAL_DB := .cache/temporal.db
 
-.PHONY: help setup test host-check images up stop start down tools gitea kagent-apply kagent-key ui \
+.PHONY: help setup test host-check images up stop start down tools gitea delivery kagent-apply kagent-key ui demo-ui app app-stop k9s legacy-watch \
         pipeline pipeline-bg pipeline-stop dev dev-stop legacy-up openshell-up openshell-check substrate-up substrate-check \
         substrate-poc forwards temporal worker worker-bg worker-stop run combined approve reject status watch adapters \
         leftovers experiment experiments clean
 
 help:
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
 
 setup: ## python venv with temporalio, httpx, mcp, pytest
 	uv venv -q -p 3.12 .venv && uv pip install -q -p .venv -r requirements.txt
@@ -36,14 +36,27 @@ stop: pipeline-stop worker-stop ## stop the cluster without deleting it (keeps i
 	-docker stop poc-control-plane
 tools: ## pinned kind + kagent CLIs in .cache/bin
 	scripts/tools.sh
-gitea: ## local Gitea with the demo-todo repo (http://localhost:3300)
+gitea: ## local Gitea with the demo-todo repo + webhook to the pipeline (http://localhost:3300)
 	scripts/gitea-up.sh
+delivery: ## wire into the kargo stack: gitops repo, Kargo project demo-todo, first release, stage edges
+	scripts/delivery-up.sh
 kagent-apply: ## (re)apply the dev agent: harness, model, egress, MCP servers, Agent
 	scripts/kagent-apply.sh
 kagent-key: ## set the Anthropic API key in the cluster from ANTHROPIC_API_KEY (env or .env)
 	scripts/kagent-apply.sh key
-ui: ## open the kagent UI and the changes page
+ui: ## open the kagent UI and the work items page
 	open http://localhost:8082 http://localhost:8765
+demo-ui: ## open every UI used in docs/DEMO.md: kagent, work items, Temporal, Gitea, Kargo, Argo CD, dev
+	open http://localhost:8082 http://localhost:8765 http://localhost:8233 http://localhost:3300/poc/demo-todo \
+	  https://localhost:31444/project/demo-todo https://localhost:31443 http://localhost:31081
+app: ## Gitea main straight from git at http://localhost:3000 (no Kargo; make dev starts it too)
+	@scripts/app.sh start
+app-stop: ## stop the main-branch app
+	@scripts/app.sh stop
+watch: ## live view: Substrate actors, OpenShell sandboxes, Temporal work items, Gitea, Kargo stages
+	@$(PY) scripts/watch.py
+k9s: ## k9s on the poc cluster, starting at the OpenShell verify/preview pods
+	k9s --context kind-poc -n openshell
 
 # ---- pipeline: temporal + worker + MCP server -------------------------------
 dev: ## temporal + worker + pipeline MCP server in the background (APP_RUNTIME=local needs no cluster)
@@ -107,7 +120,7 @@ reject: ## make reject RUN=<id> [MSG="what to change"] (with MSG the agent revis
 	$(PY) worker/start.py reject $(RUN) $(if $(MSG),"$(MSG)")
 status: ## make status RUN=<id>
 	$(PY) worker/start.py status $(RUN)
-watch: ## tmux layout, one pane per layer: make watch RUN=<id>
+legacy-watch: ## legacy stack: tmux layout, one pane per layer: make legacy-watch RUN=<id>
 	scripts/watch.sh $(RUN)
 
 adapters: ## milestone 5: same script on each adapter, no Temporal (RUNTIMES="openshell substrate")
